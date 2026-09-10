@@ -1,6 +1,6 @@
-"""claude-config-map 스캔 로직 (F1, F2)과 검증·저장 (F4, F5).
+"""claude-config-map 스캔 로직 (F1, F2)과 검증·저장 (F4, F5), 토글 (F7).
 
-스캔은 읽기 전용이고, 파일을 쓰는 곳은 save()/_backup() 둘뿐이다.
+스캔은 읽기 전용이고, 파일을 쓰는 곳은 save()/toggle()/_backup() 셋뿐이다.
 """
 
 import concurrent.futures
@@ -793,6 +793,24 @@ def _backup(path) -> str:
     return dest.resolve().as_posix()
 
 
+def _write_atomic(p: Path, data: bytes) -> None:
+    """같은 디렉터리 임시 파일에 쓰고 os.replace로 갈아끼운다.
+
+    실패하면 임시 파일을 지우고 예외를 그대로 올린다 — 원본은 손대지 않는다.
+    """
+    tmp = tempfile.NamedTemporaryFile(dir=p.parent, prefix=".config-map-", delete=False)
+    try:
+        tmp.write(data)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp.close()
+        os.replace(tmp.name, p)
+    except BaseException:
+        tmp.close()
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+
+
 def save(path, text: str, expected_mtime=None) -> dict:
     """검증 → V7 mtime 비교 → 백업 → 원자적 쓰기.
 
@@ -818,17 +836,75 @@ def save(path, text: str, expected_mtime=None) -> dict:
         data = b"\xef\xbb\xbf" + data
 
     backup = _backup(p)
-    tmp = tempfile.NamedTemporaryFile(dir=p.parent, prefix=".config-map-", delete=False)
-    try:
-        tmp.write(data)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp.close()
-        os.replace(tmp.name, p)
-    except BaseException:
-        tmp.close()
-        Path(tmp.name).unlink(missing_ok=True)
-        raise
+    _write_atomic(p, data)
     st = p.stat()
     return {"mtime": st.st_mtime, "size": st.st_size, "backup": backup,
             "issues": [i for i in issues if i["level"] != "error"]}
+
+
+# --- F7 토글 -------------------------------------------------------------
+
+# 섹션별 허용 값. 첫 값이 "기본값" — 이 값으로 토글하면 키를 지운다(기본 복원).
+TOGGLE_SECTIONS = {
+    "skillOverrides": ("on", "name-only", "user-invocable-only", "off"),
+    "enabledPlugins": (True, False),
+}
+TOGGLE_TARGETS = ("settings.local.json", "settings.json")
+
+
+def toggle(project_path, section: str, key: str, value,
+           target: str = "settings.local.json") -> dict:
+    """프로젝트 settings 파일의 skillOverrides/enabledPlugins 한 키를 설정한다.
+
+    - 파일이 없으면 만든다(디렉터리 포함). 파싱 불가면 `{"issues": [V1]}` 만 돌려준다.
+    - 기본값으로 토글하면 키를 지우고, 섹션이 비면 섹션도 지운다.
+    - 반환 `{"path", "created", "backup", "value"}` (value는 저장값, 삭제면 None).
+
+    # ponytail: 통째로 재직렬화한다(indent=2). 원본 들여쓰기·주석은 보존하지 않는다.
+    # 범위 치환이 필요해지면 그때 파서를 붙인다 — 백업이 있으니 복구는 된다.
+    """
+    p = _expand(project_path) / ".claude" / target
+    meta = read_text(p)
+    created = meta is None
+    crlf = bom = False
+    data: dict = {}
+    if meta is not None:
+        if "error" in meta:
+            return {"issues": [_issue("error", "V1", meta["error"])]}
+        crlf, bom = meta["crlf"], meta["bom"]
+        try:
+            parsed = json.loads(meta["text"])
+        except ValueError as e:
+            return {"issues": [_issue("error", "V1", f"JSON 파싱 실패: {getattr(e, 'msg', e)}",
+                                      getattr(e, "lineno", None))]}
+        if not isinstance(parsed, dict):
+            return {"issues": [_issue("error", "V1", "최상위가 객체가 아닙니다: "
+                                      + type(parsed).__name__)]}
+        data = parsed
+
+    sec = data.get(section)
+    if not isinstance(sec, dict):
+        sec = {}
+    data[section] = sec
+    stored = None if value == TOGGLE_SECTIONS[section][0] else value
+    if stored is None:
+        sec.pop(key, None)
+    else:
+        sec[key] = stored
+    if not sec:
+        data.pop(section, None)
+
+    body = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if crlf:
+        body = body.replace("\n", "\r\n")
+    raw = body.encode("utf-8")
+    if bom:
+        raw = b"\xef\xbb\xbf" + raw
+
+    backup = None
+    if created:
+        p.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        backup = _backup(p)
+    _write_atomic(p, raw)
+    return {"path": _p(p), "created": created, "backup": backup, "value": stored}

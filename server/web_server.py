@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
@@ -152,11 +152,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if path in ("/api/validate", "/api/save"):
+        if path in ("/api/validate", "/api/save", "/api/toggle"):
             body = self._body()
             if body is None:
                 return
-            return self._validate(body) if path == "/api/validate" else self._save(body)
+            if path == "/api/validate":
+                return self._validate(body)
+            return self._save(body) if path == "/api/save" else self._toggle(body)
         self._err(404, "not found")
 
     def _body(self) -> dict | None:
@@ -287,6 +289,47 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(422, {"error": "validation failed", "issues": r["issues"]})
         self._json(200, {"path": path, "mtime": r["mtime"], "size": r["size"],
                          "backup": r["backup"], "issues": r["issues"]})
+
+    def _toggle(self, body: dict):
+        with _LOCK:
+            scanned = _scan is not None
+            projects = (_scan or {}).get("projects") or []
+        if not scanned:
+            return self._err(409, "scan first")
+
+        raw = body.get("project")
+        try:
+            project = _norm(raw) if isinstance(raw, str) and raw else None
+        except (OSError, ValueError):
+            project = None
+        if project is None or not any(p.get("path") == project and p.get("exists")
+                                      for p in projects):
+            return self._err(404, "unknown project")
+
+        section, target = body.get("section"), body.get("target") or "settings.local.json"
+        key, value = body.get("key"), body.get("value")
+        if not isinstance(section, str) or section not in core.TOGGLE_SECTIONS:
+            return self._err(400, "invalid section")
+        if not isinstance(target, str) or target not in core.TOGGLE_TARGETS:
+            return self._err(400, "invalid target")
+        if not isinstance(key, str) or not key.strip():
+            return self._err(400, "invalid key")
+        # bool은 int의 하위형이라 타입을 먼저 못 박는다 (0/1이 false/true로 통과하지 않게)
+        typed = isinstance(value, bool) if section == "enabledPlugins" else isinstance(value, str)
+        if not typed or value not in core.TOGGLE_SECTIONS[section]:
+            return self._err(400, "invalid value")
+
+        try:
+            r = core.toggle(project, section, key, value, target)
+        except OSError as e:
+            log.warning("toggle failed %s: %s", project, e)
+            return self._err(500, "save failed")
+        if r.get("issues"):
+            return self._json(422, {"error": "validation failed", "issues": r["issues"]})
+        with _LOCK:  # 새로 만든 파일도 다음 /api/file에서 읽히게 (UI는 어차피 재스캔한다)
+            _allowed.add(r["path"])
+        self._json(200, {"path": r["path"], "created": r["created"], "backup": r["backup"],
+                         "section": section, "key": key, "value": r["value"]})
 
     def _effective(self, raw: str):
         if not raw:

@@ -758,5 +758,92 @@ class TestSave(FakeHome):
         self.assertEqual(list(p.parent.glob(".config-map-*")), [])
 
 
+class TestToggle(FakeHome):
+    def local(self):
+        return self.proj / ".claude" / "settings.local.json"
+
+    def data(self, p=None):
+        return json.loads((p or self.local()).read_text(encoding="utf-8-sig"))
+
+    def test_creates_file_and_directory(self):
+        fresh = Path(self.tmp.name) / "fresh"
+        r = core.toggle(fresh, "skillOverrides", "s1", "off")
+        self.assertTrue(r["created"])
+        self.assertIsNone(r["backup"])
+        self.assertEqual(r["value"], "off")
+        p = fresh / ".claude" / "settings.local.json"
+        self.assertEqual(r["path"], core._p(p))
+        self.assertEqual(self.data(p), {"skillOverrides": {"s1": "off"}})
+        self.assertEqual(p.read_bytes(), json.dumps(
+            {"skillOverrides": {"s1": "off"}}, indent=2).encode("utf-8") + b"\n")
+
+    def test_updates_existing_key_and_backs_up(self):
+        w(self.local(), json.dumps({"skillOverrides": {"s1": "off"}}))
+        r = core.toggle(self.proj, "skillOverrides", "s1", "name-only")
+        self.assertFalse(r["created"])
+        self.assertEqual(self.data(), {"skillOverrides": {"s1": "name-only"}})
+        self.assertEqual(json.loads(Path(r["backup"]).read_text(encoding="utf-8")),
+                         {"skillOverrides": {"s1": "off"}})
+
+    def test_default_value_deletes_key_and_empty_section(self):
+        w(self.local(), json.dumps({"skillOverrides": {"s1": "off"}}))
+        r = core.toggle(self.proj, "skillOverrides", "s1", "on")
+        self.assertIsNone(r["value"])
+        self.assertEqual(self.data(), {})
+
+        w(self.local(), json.dumps({"enabledPlugins": {"a@m": False}}))
+        r = core.toggle(self.proj, "enabledPlugins", "a@m", True)
+        self.assertIsNone(r["value"])
+        self.assertEqual(self.data(), {})
+
+    def test_plugin_false_is_stored(self):
+        core.toggle(self.proj, "enabledPlugins", "a@m", False)
+        self.assertEqual(self.data(), {"enabledPlugins": {"a@m": False}})
+
+    def test_other_keys_and_sections_are_kept(self):
+        w(self.local(), json.dumps({"hooks": {"Stop": []},
+                                    "skillOverrides": {"keep": "off", "s1": "off"},
+                                    "enabledPlugins": {"a@m": False}}))
+        core.toggle(self.proj, "skillOverrides", "s1", "on")
+        self.assertEqual(self.data(), {"hooks": {"Stop": []},
+                                       "skillOverrides": {"keep": "off"},
+                                       "enabledPlugins": {"a@m": False}})
+
+    def test_non_dict_section_is_replaced(self):
+        w(self.local(), json.dumps({"skillOverrides": "nope"}))
+        core.toggle(self.proj, "skillOverrides", "s1", "off")
+        self.assertEqual(self.data(), {"skillOverrides": {"s1": "off"}})
+
+    def test_crlf_and_bom_preserved(self):
+        w(self.local(), json.dumps({"skillOverrides": {}}, indent=2) + "\n",
+          newline="\r\n", bom=True)
+        core.toggle(self.proj, "skillOverrides", "s1", "off")
+        raw = self.local().read_bytes()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(b"\r\n", raw)
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+        self.assertEqual(self.data(), {"skillOverrides": {"s1": "off"}})
+
+    def test_invalid_json_returns_issue_and_keeps_file(self):
+        w(self.local(), "{bad")
+        r = core.toggle(self.proj, "skillOverrides", "s1", "off")
+        self.assertEqual(r["issues"][0]["rule"], "V1")
+        self.assertEqual(r["issues"][0]["level"], "error")
+        self.assertNotIn("path", r)
+        self.assertEqual(self.local().read_bytes(), b"{bad")
+
+    def test_top_level_list_is_issue(self):
+        w(self.local(), "[1, 2]")
+        r = core.toggle(self.proj, "skillOverrides", "s1", "off")
+        self.assertEqual(r["issues"][0]["rule"], "V1")
+        self.assertEqual(self.local().read_bytes(), b"[1, 2]")
+
+    def test_target_settings_json(self):
+        r = core.toggle(self.proj, "skillOverrides", "s1", "off",
+                        target="settings.json")
+        self.assertEqual(r["path"], core._p(self.proj / ".claude" / "settings.json"))
+        self.assertFalse(self.local().exists())
+
+
 if __name__ == "__main__":
     unittest.main()
