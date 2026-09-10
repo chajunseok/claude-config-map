@@ -57,7 +57,7 @@ pre{background:var(--soft);border:1px solid var(--bd);border-radius:4px;padding:
 .card h4{margin:0 0 4px;font-size:13px;word-break:break-all}
 .card .kv{color:var(--muted);font-size:11px;margin-bottom:4px}
 .card .desc{font-size:12px;max-height:9em;overflow:auto}
-.card .desc.none{color:#999}
+.card .desc.none{color:#666}
 .hookev{margin:12px 0 4px;font-weight:600}
 .hookrow{border-left:4px solid var(--bd);padding:4px 8px;margin:4px 0;background:var(--soft);border-radius:0 4px 4px 0}
 .hookrow.global{border-left-color:var(--blue)}
@@ -90,7 +90,9 @@ var SCOPE_KO = {global:"전역",
   "global-rules":"전역 rules", project:"프로젝트", "project-local":"프로젝트 로컬",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
-var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null};
+// seq: 비동기 응답 세대 가드. dead: 서버 종료 후 렌더 중단
+var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, msg:null, seq:0, fseq:0, dead:false};
+function stale(seq){ return S.dead || seq !== S.seq; }
 // 개발용 훅: #sample 이면 로컬 샘플 JSON을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
 
@@ -103,9 +105,10 @@ function ymd(mtime){
   var d=new Date(mtime*1000), p=function(x){return (x<10?"0":"")+x;};
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
 }
+// 파싱 실패면 null (버전 미확인)
 function cmpVer(str){
   var m=/(\d+)\.(\d+)\.(\d+)/.exec(str||"");
-  if(!m) return 0;
+  if(!m) return null;
   for(var i=0;i<3;i++){ var a=parseInt(m[i+1],10); if(a!==MIN_VER[i]) return a-MIN_VER[i]; }
   return 0;
 }
@@ -123,11 +126,10 @@ function renderTop(){
   t.appendChild(el("strong","title","Claude 설정 지도"));
   if(S.scan){
     t.appendChild(el("span","meta","스캔 "+new Date(S.scan.scanned_at).toLocaleString("ko-KR")));
-    var v = S.scan.claude_version;
-    if(v){
-      t.appendChild(el("span","meta","Claude Code "+v));
-      if(cmpVer(v) < 0) t.appendChild(badge("스킬 토글 미지원 버전","warn"));
-    }
+    var v = S.scan.claude_version, c = cmpVer(v);
+    t.appendChild(el("span","meta","Claude Code "+(c === null ? "미확인" : v)));
+    if(c === null) t.appendChild(badge("버전 미확인","warn"));
+    else if(c < 0) t.appendChild(badge("스킬 토글 미지원 버전","warn"));
     var errs = S.scan.errors || [];
     if(errs.length){
       var eb = el("button","badge err","오류 "+errs.length+"건");
@@ -139,6 +141,7 @@ function renderTop(){
       t.appendChild(eb);
     }
   }
+  if(S.msg) t.appendChild(el("span","err", S.msg));
   t.appendChild(el("span","spacer"));
   var re = el("button","btn","재스캔"); re.onclick = loadScan; t.appendChild(re);
   var sd = el("button","btn","종료"); sd.onclick = shutdown; t.appendChild(sd);
@@ -158,7 +161,18 @@ function renderErrors(){
   box.appendChild(ul);
 }
 async function shutdown(){
-  try{ await fetch("/api/shutdown",{method:"POST"}); }catch(e){}
+  var fail = null;
+  try{
+    var r = await fetch("/api/shutdown",{method:"POST"}), b = null;
+    try{ b = await r.json(); }catch(e){}
+    if(!r.ok || !b || b.ok !== true) fail = (b && b.error) || ("HTTP "+r.status);
+  }catch(e){ fail = e.message; }
+  if(fail){  // 실패면 UI 유지, 상단 바에만 표시
+    S.msg = "종료하지 못했습니다: "+fail;
+    renderTop();
+    return;
+  }
+  S.dead = true;
   document.body.textContent = "";
   var p = el("p",null,"서버가 종료되었습니다");
   p.style.padding = "24px";
@@ -236,7 +250,7 @@ function projectNode(p){
   head.appendChild(tg);
   var nb = el("button","pname"+(p.exists===false?" gone":""), p.name || p.path);
   nb.title = p.path;
-  if(S.project && S.project.path === p.path) nb.classList.add("sel");
+  if(S.project && S.project.path === p.path){ nb.classList.add("sel"); nb.setAttribute("aria-current","true"); }
   nb.onclick = function(){ selectProject(p); };
   head.appendChild(nb);
   if(p.exists === false) head.appendChild(badge("없음"));
@@ -286,25 +300,24 @@ function settingsData(obj){
   });
   return out;
 }
-function skillOverrides(){
-  var res = {};
-  if(!S.project) return res;
-  var all = settingsData(S.project.settings);
-  ["settings.json","settings.local.json"].forEach(function(k){
-    var ov = all[k] && all[k].skillOverrides;
-    if(ov && typeof ov === "object") Object.keys(ov).forEach(function(n){ res[n] = ov[n]; });
+// 전역 settings.json → 전역 local → 프로젝트 settings.json → 프로젝트 local 순 병합 (뒤가 우선)
+function mergedSetting(key){
+  var res = Object.create(null), sets = [];
+  if(S.scan && S.scan.global) sets.push(S.scan.global.settings);
+  if(S.project && S.project.exists !== false) sets.push(S.project.settings);
+  sets.forEach(function(obj){
+    var all = settingsData(obj);
+    ["settings.json","settings.local.json"].forEach(function(k){
+      var v = all[k] && all[k][key];
+      if(v && typeof v === "object") Object.keys(v).forEach(function(n){ res[n] = v[n]; });
+    });
   });
   return res;
 }
-function enabledPlugins(){
-  var res = {};
-  var all = settingsData(S.scan && S.scan.global && S.scan.global.settings);
-  ["settings.json","settings.local.json"].forEach(function(k){
-    var ep = all[k] && all[k].enabledPlugins;
-    if(ep && typeof ep === "object") Object.keys(ep).forEach(function(n){ res[n] = ep[n]; });
-  });
-  return res;
-}
+function skillOverrides(){ return mergedSetting("skillOverrides"); }
+function enabledPlugins(){ return mergedSetting("enabledPlugins"); }
+// skillOverrides 키 = 스킬 디렉터리명/커맨드 파일명 (확장자 제외)
+function itemName(f){ return f.name_meta || String(f.name || "").replace(/\.md$/,""); }
 function pluginOff(pl){ return enabledPlugins()[pl.key] === false; }
 
 /* ---------- 탭 ---------- */
@@ -321,6 +334,7 @@ function renderTabs(){
   document.getElementById("panel").setAttribute("aria-labelledby","tab-"+S.tab);
 }
 function setTab(name){
+  S.seq++;  // 탭 전환 = 이전 요청 무효
   S.tab = name;
   renderTabs();
   renderPanel();
@@ -335,21 +349,25 @@ function renderPanel(){
 }
 
 /* 1. 원문 */
-async function openFile(path){
+async function openFile(path, keepTab){
   S.file = null; S.fileErr = null;
-  setTab("raw");
-  var p = panel();
-  p.appendChild(el("p","hint","불러오는 중… "+path));
+  if(!keepTab) setTab("raw");
+  // 파일은 자체 세대(fseq) + 패널 세대(seq)를 함께 본다 — 유효 규칙 탭과 카운터를 다투지 않게
+  var seq = S.seq, fseq = ++S.fseq;
+  if(S.tab === "raw") panel().appendChild(el("p","hint","불러오는 중… "+path));
+  var file = null, err = null;
   try{
-    S.file = await getJSON("/api/file?path="+encodeURIComponent(path));
+    file = await getJSON("/api/file?path="+encodeURIComponent(path));
   }catch(e){
-    S.fileErr = path+" — "+e.message;
+    err = "파일을 불러오지 못했습니다: "+path+" — "+e.message;
   }
+  if(stale(seq) || fseq !== S.fseq) return;
+  S.file = file; S.fileErr = err;
   if(S.tab === "raw") renderRaw();
 }
 function renderRaw(){
   var p = panel();
-  if(S.fileErr){ p.appendChild(el("p","err","파일을 불러오지 못했습니다: "+S.fileErr)); return; }
+  if(S.fileErr){ p.appendChild(el("p","err", S.fileErr)); return; }
   if(!S.file){ p.appendChild(el("p","hint","좌측 트리에서 파일을 선택하세요.")); return; }
   var f = S.file;
   p.appendChild(el("div","srchdr")).appendChild(el("span","p", f.path));
@@ -366,13 +384,14 @@ async function renderEff(){
   p.appendChild(el("div","p hint", S.project.path));
   var loading = el("p","hint","불러오는 중…");
   p.appendChild(loading);
-  var items;
+  var items, seq = ++S.seq, proj = S.project.path;
   try{
-    items = await getJSON("/api/effective?project="+encodeURIComponent(S.project.path));
+    items = await getJSON("/api/effective?project="+encodeURIComponent(proj));
   }catch(e){
+    if(stale(seq)) return;
     loading.className = "err"; loading.textContent = "유효 규칙을 불러오지 못했습니다: "+e.message; return;
   }
-  if(S.tab !== "eff") return;
+  if(stale(seq) || S.tab !== "eff" || !S.project || S.project.path !== proj) return;
   loading.remove();
   if(!items.length){ p.appendChild(el("p","hint","적용되는 규칙 파일이 없습니다.")); return; }
   for(var i=0;i<items.length;i++){
@@ -390,8 +409,10 @@ async function renderEff(){
     /* eslint-disable no-loop-func */
     (function(pre, path){
       getJSON("/api/file?path="+encodeURIComponent(path)).then(function(f){
+        if(stale(seq)) return;
         pre.textContent = f.text || "";
       }, function(e){
+        if(stale(seq)) return;
         pre.textContent = "본문을 불러오지 못했습니다: "+e.message;
         pre.className = "err";
       });
@@ -400,35 +421,39 @@ async function renderEff(){
 }
 
 /* 3. 스킬·에이전트·커맨드 */
+// PRD §5 우선순위: 전역 스킬 → 프로젝트 스킬 → 에이전트 → 커맨드(전역·프로젝트) → 플러그인
+function rankOf(kind, scope){       // scope: 0 전역, 1 프로젝트, 2 플러그인
+  if(scope === 2) return 5;
+  if(kind === "skill") return scope;
+  if(kind === "agent") return 2 + scope;
+  return 4;
+}
+// skills/ 아래 SKILL.md 가 아닌 부속 문서(reference.md 등)는 스킬이 아니다
+function isSkillFile(f){ return !!f.name_meta || f.name === "SKILL.md"; }
 function collect(){
-  var out = [], g = (S.scan && S.scan.global) || {};
-  function push(arr, kind, origin, rank, extra){
+  var out = [], g = (S.scan && S.scan.global) || {}, ov = skillOverrides();
+  function push(arr, kind, scope, origin, extra){
     (arr||[]).forEach(function(f){
-      out.push({name:f.name_meta || f.name, kind:kind, origin:origin, rank:rank,
-                desc:f.description, path:f.path, off:extra && extra.off, offLabel:extra && extra.offLabel});
+      if(kind === "skill" && !isSkillFile(f)) return;
+      var nm = itemName(f);
+      out.push({name:nm, kind:kind, origin:origin, rank:rankOf(kind, scope),
+                desc:f.description, path:f.path,
+                off: extra ? extra.off : ov[nm] === "off",
+                offLabel: extra ? extra.offLabel : "이 프로젝트에서 OFF"});
     });
   }
-  push(g.skills,"skill","전역",0); push(g.agents,"agent","전역",0); push(g.commands,"command","전역",0);
+  push(g.skills,"skill",0,"전역"); push(g.agents,"agent",0,"전역"); push(g.commands,"command",0,"전역");
   if(S.project && S.project.exists !== false){
-    var ov = skillOverrides();
-    var mark = function(list, kind){
-      (list||[]).forEach(function(f){
-        var nm = f.name_meta || f.name;
-        out.push({name:nm, kind:kind, origin:"프로젝트", rank:1, desc:f.description, path:f.path,
-                  off: ov[nm] === "off", offLabel:"이 프로젝트에서 OFF"});
-      });
-    };
-    mark(S.project.skills,"skill"); mark(S.project.agents,"agent"); mark(S.project.commands,"command");
-    // 전역 항목도 프로젝트 override 대상
-    out.forEach(function(c){
-      if(c.rank === 0 && ov[c.name] === "off"){ c.off = true; c.offLabel = "이 프로젝트에서 OFF"; }
-    });
+    push(S.project.skills,"skill",1,"프로젝트");
+    push(S.project.agents,"agent",1,"프로젝트");
+    push(S.project.commands,"command",1,"프로젝트");
   }
-  (S.scan.plugins || []).forEach(function(pl){
+  ((S.scan && S.scan.plugins) || []).forEach(function(pl){
     if(pl.exists === false) return;
-    var off = pluginOff(pl), origin = "플러그인:"+(pl.name || pl.key);
-    push(pl.skills,"skill",origin,2,{off:off, offLabel:"플러그인 OFF"});
-    push(pl.commands,"command",origin,2,{off:off, offLabel:"플러그인 OFF"});
+    // 플러그인 스킬에는 skillOverrides 미적용 (F7) — 플러그인 단위 OFF만
+    var extra = {off: pluginOff(pl), offLabel:"플러그인 OFF"}, origin = "플러그인:"+(pl.name || pl.key);
+    push(pl.skills,"skill",2,origin,extra);
+    push(pl.commands,"command",2,origin,extra);
   });
   out.sort(function(a,b){ return a.rank - b.rank || a.name.localeCompare(b.name); });
   return out;
@@ -437,7 +462,9 @@ function renderCards(){
   var p = panel();
   if(!S.scan) return;
   var list = collect();
-  var note = "전역 + " + (S.project ? "프로젝트 "+S.project.name : "(프로젝트 미선택)") + " + 플러그인 · 총 "+list.length+"개";
+  var note = "전역 + " + (S.project
+      ? "프로젝트 "+(S.project.name || S.project.path) + (S.project.exists === false ? " (경로 없음)" : "")
+      : "(프로젝트 미선택)") + " + 플러그인 · 총 "+list.length+"개";
   p.appendChild(el("p","hint", note));
   var grid = el("div","cards");
   list.forEach(function(c){
@@ -471,7 +498,8 @@ function renderHooks(){
   var p = panel();
   var hooks = (S.scan && S.scan.hooks) || [];
   if(!hooks.length){ p.appendChild(el("p","hint","등록된 훅이 없습니다.")); return; }
-  var order = [], byEvent = {};
+  // 이벤트명이 constructor/__proto__ 여도 안전하도록 프로토타입 없는 객체
+  var order = [], byEvent = Object.create(null);
   hooks.forEach(function(h){
     var e = h.event || "(이벤트 없음)";
     if(!byEvent[e]){ byEvent[e] = []; order.push(e); }
@@ -500,22 +528,33 @@ function renderHooks(){
 function renderMcp(){
   var p = panel();
   var mcp = (S.scan && S.scan.mcp) || [];
-  if(!mcp.length){ p.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
-  var order = [], bySrc = {};
+  var order = [], bySrc = Object.create(null);
   mcp.forEach(function(m){
     var s = m.source || "(출처 없음)";
     if(!bySrc[s]){ bySrc[s] = []; order.push(s); }
     bySrc[s].push(m);
   });
+  // 플러그인 manifest 의 mcpServers — 있는 플러그인만 그룹 추가
+  ((S.scan && S.scan.plugins) || []).forEach(function(pl){
+    if(pl.exists === false) return;
+    var srv = pl.mcp_servers || {}, names = Object.keys(srv);
+    if(!names.length) return;
+    var key = "plugin:"+(pl.name || pl.key);
+    if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
+    names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
+  });
+  if(!order.length){ p.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
   order.forEach(function(s){
-    p.appendChild(el("h3", null, s === "global" ? "전역" : (s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8) : s)));
+    p.appendChild(el("h3", null, s === "global" ? "전역"
+      : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
+      : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s));
     var tb = el("table");
     var thead = el("thead"), tr = el("tr");
     ["이름","command / url","기타 설정"].forEach(function(t){ tr.appendChild(el("th", null, t)); });
     thead.appendChild(tr); tb.appendChild(thead);
     var tbody = el("tbody");
     bySrc[s].forEach(function(m){
-      var cfg = m.config || {}, r = el("tr");
+      var cfg = (m.config && typeof m.config === "object") ? m.config : {}, r = el("tr");
       r.appendChild(el("td", null, m.name || ""));
       r.appendChild(el("td", null, cfg.command || cfg.url || "-"));
       var rest = {};
@@ -538,26 +577,59 @@ function renderMcp(){
 }
 
 /* ---------- 부트 ---------- */
+// 재스캔 후 선택 복원용: scan 결과에 등장하는 파일 경로 집합 (API 계약과 동일 범위)
+function scanPaths(sc){
+  var set = Object.create(null);
+  function add(f){ if(f && f.path) set[f.path] = true; }
+  function addAll(a){ (a||[]).forEach(add); }
+  function addSettings(o){ Object.keys(o||{}).forEach(function(k){ add(o[k]); }); }
+  function addKinds(o){ addAll(o.skills); addAll(o.agents); addAll(o.commands); }
+  var g = sc.global || {};
+  add(g.claude_md); addAll(g.rules); addSettings(g.settings); addKinds(g);
+  (sc.projects||[]).forEach(function(p){
+    addAll(p.claude_md); addAll(p.rules); addSettings(p.settings); addKinds(p);
+  });
+  (sc.plugins||[]).forEach(function(pl){ add(pl.manifest); addAll(pl.skills); addAll(pl.commands); });
+  return set;
+}
 async function loadScan(){
-  S.scan = null; S.project = null; S.file = null; S.fileErr = null;
+  if(S.dead) return;
+  var prevProj = S.project && S.project.path, prevFile = S.file && S.file.path;
+  var seq = ++S.seq;
+  S.scan = null; S.project = null; S.file = null; S.fileErr = null; S.msg = null;
   renderTop();
   clear(document.getElementById("tree")).appendChild(el("p","hint","스캔 중…"));
   var p = panel();
   p.appendChild(el("p","hint","스캔 중…"));
+  var scan;
   try{
-    S.scan = await getJSON(SAMPLE ? "./scan-sample.json" : "/api/scan");
+    scan = await getJSON(SAMPLE ? "./scan-sample.json" : "/api/scan");
   }catch(e){
+    if(stale(seq)) return;
     clear(document.getElementById("tree"));
     var q = panel();
     q.appendChild(el("p","err","스캔에 실패했습니다: "+e.message));
     var b = el("button","btn","다시 시도"); b.onclick = loadScan; q.appendChild(b);
     return;
   }
+  if(stale(seq)) return;
+  S.scan = scan;
+  // 이전 선택 복원
+  if(prevProj){
+    var found = (scan.projects||[]).filter(function(x){ return x.path === prevProj; })[0];
+    if(found) S.project = found;
+    else S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProj;
+  }
+  if(prevFile && !scanPaths(scan)[prevFile]){
+    S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
+    prevFile = null;
+  }
   renderTop();
   renderErrors();
   renderTree();
   renderTabs();
   renderPanel();
+  if(prevFile) openFile(prevFile, true);
 }
 renderTabs();
 loadScan();
