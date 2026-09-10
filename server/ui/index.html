@@ -91,11 +91,10 @@ var SCOPE_KO = {global:"전역",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
 // seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관). dead: 서버 종료 후 렌더 중단
-var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, msg:null,
+var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null,
          seq:0, fseq:0, sseq:0, loading:false, dead:false};
 function stale(seq){ return S.dead || seq !== S.seq; }
-// 개발용 훅: #sample 이면 로컬 샘플 JSON을 스캔 응답 대신 사용
-// 개발용 — 정적 서버에서 scan-sample.json 로드
+// 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
 
 function el(tag, cls, text){var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
@@ -164,6 +163,7 @@ function renderErrors(){
   box.appendChild(ul);
 }
 async function shutdown(){
+  if(S.dead) return;
   var fail = null;
   try{
     var r = await fetch("/api/shutdown",{method:"POST"}), b = null;
@@ -362,25 +362,25 @@ function renderPanel(){
 
 /* 1. 원문 */
 async function openFile(path, keepTab){
-  S.file = null; S.fileErr = null;
+  S.file = null; S.fileErr = null; S.filePath = path;
   if(!keepTab) setTab("raw");
-  // 파일은 자체 세대(fseq) + 패널 세대(seq)를 함께 본다 — 유효 규칙 탭과 카운터를 다투지 않게
-  var seq = S.seq, fseq = ++S.fseq;
-  if(S.tab === "raw") panel().appendChild(el("p","hint","불러오는 중… "+path));
+  // 파일은 자체 세대(fseq) + 스캔 세대(sseq)만 본다 — 탭 전환이 진행 중인 파일 응답을 버리지 않게
+  var sseq = S.sseq, fseq = ++S.fseq;
+  if(S.tab === "raw") renderRaw();  // filePath 기준 "불러오는 중" 표시
   var file = null, err = null;
   try{
     file = await getJSON("/api/file?path="+encodeURIComponent(path));
   }catch(e){
     err = "파일을 불러오지 못했습니다: "+path+" — "+e.message;
   }
-  if(stale(seq) || fseq !== S.fseq) return;
+  if(S.dead || sseq !== S.sseq || fseq !== S.fseq) return;
   S.file = file; S.fileErr = err;
   if(S.tab === "raw") renderRaw();
 }
 function renderRaw(){
   var p = panel();
   if(S.fileErr){ p.appendChild(el("p","err", S.fileErr)); return; }
-  if(!S.file){ p.appendChild(el("p","hint","좌측 트리에서 파일을 선택하세요.")); return; }
+  if(!S.file){ p.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "좌측 트리에서 파일을 선택하세요.")); return; }
   var f = S.file;
   p.appendChild(el("div","srchdr")).appendChild(el("span","p", f.path));
   p.appendChild(el("div","hint","줄바꿈 "+(f.crlf?"CRLF":"LF")+" · BOM "+(f.bom?"있음":"없음")+" · "+kb(f.size)+" · "+ymd(f.mtime)));
@@ -619,7 +619,7 @@ function scanPaths(sc){
 async function loadScan(){
   if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
-  var prevProject = S.project && S.project.path, prevFile = S.file && S.file.path;
+  var prevProject = S.project && S.project.path, prevFile = S.filePath;
   var seq = ++S.sseq;               // 스캔 세대는 탭 전환(S.seq)과 무관
   S.loading = true; S.msg = null;
   renderTop();
@@ -631,9 +631,9 @@ async function loadScan(){
   }catch(e){ err = e.message; }
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
-  if(err){
+  if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 탭과 어긋나지 않게
     renderTop();
-    clear(document.getElementById("tree"));
+    if(S.scan) renderTree();
     var q = panel();
     q.appendChild(el("p","err","스캔에 실패했습니다: "+err));
     var b = el("button","btn","다시 시도"); b.onclick = loadScan; q.appendChild(b);
@@ -642,7 +642,7 @@ async function loadScan(){
   S.scan = scan;
   S.seq++;   // 이전 스캔 기준으로 날아간 패널 요청 무효화
   // 이전 선택 복원
-  S.project = null; S.file = null; S.fileErr = null;
+  S.project = null; S.file = null; S.fileErr = null; S.filePath = null;
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
