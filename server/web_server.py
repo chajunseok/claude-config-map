@@ -140,8 +140,8 @@ class Handler(BaseHTTPRequestHandler):
         self._err(404, "not found")
 
     def _own_origins(self) -> set:
-        port = self.server.server_address[1]
-        return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+        host, port = self.server.server_address[:2]
+        return {f"http://127.0.0.1:{port}", f"http://localhost:{port}", f"http://{host}:{port}"}
 
     # --- 엔드포인트 ---
 
@@ -208,7 +208,7 @@ def live_url() -> str | None:
     try:
         with urllib.request.urlopen(url + "/api/ping", timeout=1) as r:
             return url if json.load(r).get("ok") else None
-    except (OSError, urllib.error.URLError, ValueError):
+    except (OSError, urllib.error.URLError, ValueError, AttributeError):
         return None
 
 
@@ -227,6 +227,7 @@ def _acquire(lock: Path) -> bool:
     while not create():
         if time.monotonic() >= deadline:
             log.warning("잠금 파일이 %.1f초 넘게 남아 stale로 보고 제거: %s", LOCK_WAIT, lock)
+            # ponytail: 두 프로세스가 동시에 deadline을 넘기면 서로의 잠금을 지울 수 있음 — 3초 창, 허용
             try:  # 잠금 주인이 죽은 경우 — 지우고 한 번만 다시 잡는다
                 lock.unlink()
             except OSError:
@@ -292,9 +293,9 @@ def main(argv=None) -> int:
             pass
     log.info("serving %s", url)
     print(url, flush=True)  # 커맨드 파일이 이 첫 줄을 읽는다
-    if not args.no_browser:
-        webbrowser.open(url)
     try:
+        if not args.no_browser:  # 서빙과 병행 — 브라우저 기동이 느려도 ping 응답을 막지 않는다
+            threading.Thread(target=webbrowser.open, args=(url,), daemon=True).start()
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
