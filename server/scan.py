@@ -263,8 +263,14 @@ def _scan_projects(cfg=None) -> list:
     projects = _as_dict(root.get("projects"), cfg.get("path"), "projects") if root else None
     if not projects:
         return []
-    keys = {raw: _p(raw) for raw in projects}
-    all_keys = set(keys.values())
+    # 같은 폴더가 `C:/x`·`c:/x` 처럼 표기만 다르게 등록돼 있으면 하나만 (첫 항목 유지)
+    keys, all_keys = {}, set()
+    for raw in projects:
+        key = _p(raw)
+        if key in all_keys:
+            continue
+        keys[raw] = key
+        all_keys.add(key)
     home_key = _p(home())
     plan = []
     for raw, key in keys.items():
