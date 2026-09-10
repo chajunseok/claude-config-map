@@ -17,12 +17,16 @@ python --version
 py -3 --version
 
 # 2. 찾은 Python으로 서버를 띄운다 (Bash 도구의 run_in_background 로 실행).
-"<찾은 python>" "${CLAUDE_PLUGIN_ROOT}/server/web_server.py"
+#    python3 / python 이 성공한 경우:
+"python3" "${CLAUDE_PLUGIN_ROOT}/server/web_server.py"
+#    py -3 만 성공한 경우 (`-3` 은 실행 파일명이 아니라 별도 인자):
+py -3 "${CLAUDE_PLUGIN_ROOT}/server/web_server.py"
 ```
 
 ## Notes
 
 - 서버 스크립트 경로는 `${CLAUDE_PLUGIN_ROOT}/server/web_server.py` 다. `CLAUDE_PLUGIN_ROOT` 가 비어 있으면 폴백으로 `~/.claude/plugins/cache/claude-config-map/config-map/*/server/web_server.py` 중 **버전 폴더명이 가장 큰 것**을 쓴다.
+- `py` 는 `-3` 을 **별도 인자로** 넘긴다. `"py -3"` 처럼 한 덩어리로 따옴표에 넣으면 실행 파일명이 `py -3` 가 되어 실패한다.
 - Python 실행 파일은 `python3` → `python` → `py -3` 순서로 시도한다. 각 후보마다 먼저 `<후보> --version` 을 실행해 출력이 **Python 3.11 이상**인지 확인하고, 첫 성공 후보에서 멈춘다. (Windows Store의 가짜 `python` 별칭은 `--version` 이 실패하거나 설치 창만 열므로 이 검사로 걸러진다.)
 - 어느 후보도 없거나 전부 3.11 미만이면 **아래 문구만 출력하고 끝낸다.** 자동 설치나 추가 경로 탐색은 하지 않는다.
 

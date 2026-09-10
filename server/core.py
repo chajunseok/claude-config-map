@@ -1,10 +1,13 @@
 """claude-config-map 스캔 로직 (F1, F2). 읽기 전용 — 파일을 쓰지 않는다."""
 
+import concurrent.futures
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,10 +21,42 @@ EXCLUDE_DIRS = {"node_modules", ".git", "dist", "build", "target", ".venv",
 MD_NAMES = {"CLAUDE.md", "CLAUDE.local.md"}
 KIND_DIRS = ("skills", "agents", "commands")
 
+# ponytail: 파싱·권한 실패를 한 곳에 모으는 모듈 전역. scan()이 시작할 때 비운다.
+# scan()이 잠금으로 직렬화되므로 전역 리스트로 충분. 동시 스캔이 필요해지면 인자 전달로 교체.
+_errors: list = []
+
+# ponytail: scan() 전체를 감싸는 단일 전역 락. 동시 스캔은 직렬화된다.
+# 병렬 스캔 처리량이 필요해지면 _errors를 인자로 넘기고 락을 없앤다.
+_SCAN_LOCK = threading.Lock()
+
+_UNSET = object()
+
+
+def _err(path, message: str) -> dict:
+    """에러를 전역 목록에 남기고 같은 dict를 돌려준다."""
+    e = {"path": _p(path), "error": message}
+    _errors.append(e)
+    log.warning("%s: %s", e["path"], message)
+    return dict(e)
+
+
+def errors() -> list:
+    return list(_errors)
+
+
+def _expand(path) -> Path:
+    """선행 `~`를 home() 기준으로 편다. os.path.expanduser는 테스트 홈을 무시한다."""
+    s = str(path)
+    if s == "~":
+        return home()
+    if s[:2] in ("~/", "~\\"):
+        return home() / s[2:]
+    return Path(s)
+
 
 def _p(path) -> str:
-    """표시·비교용 경로 문자열. resolve 후 슬래시."""
-    return Path(path).resolve().as_posix()
+    """표시·비교용 경로 문자열. `~` 확장 → resolve → 슬래시."""
+    return _expand(path).resolve().as_posix()
 
 
 def home() -> Path:
@@ -40,13 +75,20 @@ def home() -> Path:
 
 
 def read_text(path) -> dict | None:
-    """utf-8-sig로 읽고 원본 줄바꿈·BOM 메타를 함께 반환. 없으면 None."""
-    p = Path(path)
+    """utf-8-sig로 읽고 원본 줄바꿈·BOM 메타를 함께 반환.
+
+    없으면 None, 권한 등으로 못 읽으면 `{"path", "error"}`.
+    """
+    p = _expand(path)
     try:
         raw = p.read_bytes()
-    except (FileNotFoundError, NotADirectoryError, IsADirectoryError, PermissionError):
+        st = p.stat()
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
         return None
-    st = p.stat()
+    except PermissionError as e:
+        return _err(p, f"permission denied: {e}")
+    except OSError as e:
+        return _err(p, f"read failed: {e}")
     return {
         "text": raw.decode("utf-8-sig", errors="replace"),
         "crlf": b"\r\n" in raw,
@@ -79,9 +121,8 @@ def parse_frontmatter(text: str) -> dict:
     return {}  # 닫는 `---`가 없으면 frontmatter가 아니다
 
 
-# ponytail: 디렉터리 개수 상한. `C:/`나 홈처럼 거대한 경로가 프로젝트로 등록돼 있으면
-# 제외 목록·깊이 상한만으로는 분 단위가 된다. 초과분은 버리고 truncated로 표시한다.
-# 정확도가 필요해지면 프로젝트별 상한을 UI에서 올리는 쪽으로 확장한다.
+# ponytail: 디렉터리 개수 상한. 거대 경로는 coverage=root-only로 먼저 걸러지므로
+# 이 예산은 남은 정상 프로젝트에 대한 안전망이다. 초과하면 즉시 순회를 끊는다.
 DIR_BUDGET = 20000
 
 
@@ -94,30 +135,27 @@ def iter_md(root, names=MD_NAMES, exclude=EXCLUDE_DIRS, max_depth: int = 8,
 def _walk_md(root, names=MD_NAMES, exclude=EXCLUDE_DIRS, max_depth: int = 8,
              budget: int = DIR_BUDGET):
     """iter_md와 같되 (파일 목록, 상한 초과 여부)를 돌려준다."""
-    root = Path(root)
+    root = _expand(root)
     if not root.is_dir():
         return [], False
-    base = len(root.resolve().parts)
+    root_str = str(root.resolve())
     found = []
     seen = 0
     truncated = False
-    for dirpath, dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root_str):
         seen += 1
         if seen > budget:
             truncated = True
-            dirs[:] = []
-            continue
-        if len(Path(dirpath).resolve().parts) - base >= max_depth:
+            break
+        if dirpath[len(root_str):].count(os.sep) >= max_depth:
             dirs[:] = []
         else:
-            # 점으로 시작하는 디렉터리는 캐시·툴 폴더라 CLAUDE.md가 없다. `.claude`만 예외
-            dirs[:] = [d for d in dirs
-                       if d not in exclude and (not d.startswith(".") or d == ".claude")]
+            dirs[:] = [d for d in dirs if d not in exclude]
         for f in files:
             if f in names:
                 found.append(Path(dirpath) / f)
     if truncated:
-        log.info("scan truncated at %d dirs: %s", budget, _p(root))
+        log.info("scan truncated at %d dirs: %s", budget, root_str)
     return found, truncated
 
 
@@ -128,21 +166,23 @@ def _file_entry(path, shared: bool = False, frontmatter: bool = False) -> dict:
          "mtime": st.st_mtime, "shared": shared}
     if frontmatter:
         meta = read_text(p)
-        fm = parse_frontmatter(meta["text"]) if meta else {}
+        fm = parse_frontmatter(meta["text"]) if meta and "text" in meta else {}
         e["name_meta"] = fm.get("name")
         e["description"] = fm.get("description")
     return e
 
 
 def _read_json(path) -> dict | None:
-    """JSON 파일 읽기. 없으면 None, 파싱 실패면 `error` 필드만 담은 dict."""
+    """JSON 파일 읽기. 없으면 None, 못 읽거나 파싱 실패면 `error` 필드를 담은 dict."""
     meta = read_text(path)
     if meta is None:
         return None
+    if "error" in meta:
+        return meta
     try:
-        data = json.loads(meta["text"]) if meta["text"].strip() else {}
+        data = json.loads(meta["text"])
     except ValueError as e:
-        return {"path": _p(path), "error": str(e)}
+        return _err(path, f"invalid json: {e}")
     return {"path": _p(path), "data": data, "mtime": meta["mtime"], "size": meta["size"]}
 
 
@@ -187,16 +227,25 @@ def scan_global() -> dict:
     return g
 
 
-def scan_project(path) -> dict:
-    p = Path(path)
+def scan_project(path, coverage: str = "full", coverage_reason: str | None = None,
+                 tracked=_UNSET) -> dict:
+    p = _expand(path)
     if not p.is_dir():
         return {"path": _p(p), "exists": False}
 
-    shared_set = _git_tracked(p)
-    proj = {"path": _p(p), "exists": True, "name": p.name,
+    shared_set = _git_tracked(p) if tracked is _UNSET else tracked
+    proj = {"path": _p(p), "exists": True, "name": p.name, "coverage": coverage,
             "git": shared_set is not None, "rules": [], "settings": {}, "imports": []}
+    if coverage_reason:
+        proj["coverage_reason"] = coverage_reason
 
-    md_paths, proj["truncated"] = _walk_md(p)
+    if coverage == "root-only":
+        # 다른 프로젝트의 조상·드라이브 루트·홈은 재귀하지 않는다 (C7)
+        md_paths = [p / n for n in sorted(MD_NAMES) if (p / n).is_file()]
+        proj["truncated"] = False
+    else:
+        md_paths, proj["truncated"] = _walk_md(p)
+
     files = [_file_entry(f, _shared(f, shared_set)) for f in md_paths]
     root_posix = _p(p)
     for e in files:
@@ -232,7 +281,7 @@ def _imports(md_path, project_root: Path) -> list:
     # ponytail: 줄 시작 `@` 토큰만 본다. 중첩 import는 따라가지 않는다 (PRD S5).
     """
     meta = read_text(md_path)
-    if not meta:
+    if not meta or "text" not in meta:
         return []
     out = []
     for line in meta["text"].splitlines():
@@ -240,7 +289,7 @@ def _imports(md_path, project_root: Path) -> list:
         if not s.startswith("@") or len(s) < 2:
             continue
         token = s[1:].split()[0]
-        target = Path(os.path.expanduser(token))
+        target = _expand(token)
         if not target.is_absolute():
             target = project_root / token
         out.append({"from": _p(md_path), "raw": token,
@@ -251,24 +300,60 @@ def _imports(md_path, project_root: Path) -> list:
 def _git_tracked(root: Path) -> set | None:
     """git 추적 파일 절대경로 집합. git이 없거나 실패·타임아웃이면 None."""
     try:
-        r = subprocess.run(["git", "-C", str(root), "ls-files"],
+        r = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
                            capture_output=True, text=True, timeout=2,
                            encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
-    return {_p(root / line) for line in r.stdout.splitlines() if line.strip()}
+    out = r.stdout
+    if isinstance(out, bytes):  # text=True를 무시하는 mock 대비
+        out = out.decode("utf-8", "replace")
+    # -z: core.quotepath 인용을 피하려면 NUL 구분이 필수 (비ASCII 경로)
+    return {_p(root / n) for n in out.split("\0") if n.strip()}
 
 
-def scan_projects() -> list:
-    data = _read_json(home() / ".claude.json")
-    if not data or "data" not in data:
+def _coverage_of(key: str, all_keys: set, home_key: str):
+    """거대 루트 판정. (coverage, reason)."""
+    if key == home_key:
+        return "root-only", "home"
+    anchor = Path(key).anchor.replace("\\", "/")
+    if anchor and anchor.rstrip("/") == key.rstrip("/"):
+        return "root-only", "drive-root"
+    prefix = key.rstrip("/") + "/"
+    if any(other != key and other.startswith(prefix) for other in all_keys):
+        return "root-only", "ancestor"
+    return "full", None
+
+
+def scan_projects(cfg=None) -> list:
+    if cfg is None:
+        cfg = _read_json(home() / ".claude.json")
+    if not cfg or "data" not in cfg:
         return []
-    projects = data["data"].get("projects")
+    projects = cfg["data"].get("projects")
     if not isinstance(projects, dict):
         return []
-    return [scan_project(path) for path in projects]
+    keys = {raw: _p(raw) for raw in projects}
+    all_keys = set(keys.values())
+    home_key = _p(home())
+    plan = []
+    for raw, key in keys.items():
+        cov, reason = _coverage_of(key, all_keys, home_key)
+        plan.append((_expand(raw), cov, reason))
+
+    # ponytail: git ls-files가 스캔 시간의 대부분(순차 47회 = 15초). subprocess뿐이라
+    # 스레드로 겹쳐 돌린다. 워커 8개 고정 — 프로젝트 수가 수백이 되면 그때 조정한다.
+    roots = [root for root, _, _ in plan if root.is_dir()]
+    tracked = {}
+    if roots:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            for root, res in zip(roots, ex.map(_git_tracked, roots)):
+                tracked[root] = res
+
+    return [scan_project(root, cov, reason, tracked.get(root))
+            for root, cov, reason in plan]
 
 
 def scan_plugins() -> list:
@@ -284,9 +369,12 @@ def scan_plugins() -> list:
 
 
 def _scan_plugin(key: str, entry: dict) -> dict:
-    root = Path(entry.get("installPath", ""))
+    install = (entry or {}).get("installPath") or ""
+    if not str(install).strip():
+        return {"name": key, "exists": False}
+    root = _expand(install)
     p = {"key": key, "version": entry.get("version"), "scope": entry.get("scope"),
-         "path": _p(root) if str(root) else None, "exists": root.is_dir(),
+         "path": _p(root), "exists": root.is_dir(),
          "manifest": None, "skills": [], "commands": [], "hooks": None,
          "mcp_servers": {}}
     if not p["exists"]:
@@ -308,11 +396,12 @@ def _scan_plugin(key: str, entry: dict) -> dict:
 
     commands = root / "commands"
     if commands.is_dir():
-        p["commands"] = [_file_entry(f) for f in sorted(commands.rglob("*")) if f.is_file()]
+        p["commands"] = [_file_entry(f, frontmatter=(f.suffix == ".md"))
+                         for f in sorted(commands.rglob("*")) if f.is_file()]
 
     hooks_ref = data.get("hooks")
     if isinstance(hooks_ref, str):
-        hf = _read_json(root / hooks_ref.lstrip("./"))
+        hf = _read_json(root / hooks_ref)
         if hf is not None:
             hd = hf.get("data")
             # 플러그인 훅 파일은 {"hooks": {...}} 로 감싸는 형태와 평면 형태가 모두 있다
@@ -323,19 +412,20 @@ def _scan_plugin(key: str, entry: dict) -> dict:
     return p
 
 
-def scan_mcp() -> list:
-    data = _read_json(home() / ".claude.json")
-    if not data or "data" not in data:
+def scan_mcp(cfg=None) -> list:
+    if cfg is None:
+        cfg = _read_json(home() / ".claude.json")
+    if not cfg or "data" not in cfg:
         return []
-    d = data["data"]
+    d = cfg["data"]
     out = []
-    for name, cfg in (d.get("mcpServers") or {}).items():
-        out.append({"name": name, "source": "global", "config": cfg})
+    for name, cfgv in (d.get("mcpServers") or {}).items():
+        out.append({"name": name, "source": "global", "config": cfgv})
     for path, pd in (d.get("projects") or {}).items():
         if not isinstance(pd, dict):
             continue
-        for name, cfg in (pd.get("mcpServers") or {}).items():
-            out.append({"name": name, "source": f"project:{_p(path)}", "config": cfg})
+        for name, cfgv in (pd.get("mcpServers") or {}).items():
+            out.append({"name": name, "source": f"project:{_p(path)}", "config": cfgv})
     return out
 
 
@@ -401,8 +491,12 @@ def hook_flows(sources: list) -> list:
 
 
 def _claude_version() -> str | None:
+    # Windows npm 설치본은 claude.cmd라 ["claude", ...]가 FileNotFoundError (S1)
+    exe = shutil.which("claude")
+    if not exe:
+        return None
     try:
-        r = subprocess.run(["claude", "--version"], capture_output=True, text=True,
+        r = subprocess.run([exe, "--version"], capture_output=True, text=True,
                            timeout=3, encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
@@ -410,24 +504,32 @@ def _claude_version() -> str | None:
 
 
 def scan() -> dict:
+    with _SCAN_LOCK:
+        return _scan()
+
+
+def _scan() -> dict:
+    _errors.clear()
     h = home()
     log.info("scanning %s", _p(h))
+    cfg = _read_json(h / ".claude.json")  # projects·mcp가 같은 파일을 공유 (C1)
     g = scan_global()
-    projects = scan_projects()
+    projects = scan_projects(cfg)
     plugins = scan_plugins()
+    mcp = scan_mcp(cfg)
 
     sources = []
     for name, s in g["settings"].items():
         if "data" in s:
-            sources.append({"source": "global", "hooks": s["data"].get("hooks")})
+            sources.append({"source": f"global:{name}", "hooks": s["data"].get("hooks")})
     for proj in projects:
         for name, s in (proj.get("settings") or {}).items():
             if "data" in s:
-                sources.append({"source": f"project:{proj['path']}",
+                sources.append({"source": f"project:{proj['path']}:{name}",
                                 "hooks": s["data"].get("hooks")})
     for pl in plugins:
         if pl.get("hooks"):
-            sources.append({"source": f"plugin:{pl.get('name', pl['key'])}",
+            sources.append({"source": f"plugin:{pl.get('name', pl.get('key'))}",
                             "hooks": pl["hooks"].get("hooks")})
 
     return {
@@ -437,6 +539,7 @@ def scan() -> dict:
         "global": g,
         "projects": projects,
         "plugins": plugins,
-        "mcp": scan_mcp(),
+        "mcp": mcp,
         "hooks": hook_flows(sources),
+        "errors": errors(),
     }
