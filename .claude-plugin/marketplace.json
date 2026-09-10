@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-config-map",
+  "description": "Visualize every local Claude Code config (CLAUDE.md, settings, skills, hooks, plugins, MCP) in one browser view",
+  "owner": {
+    "name": "junseok.cha",
+    "url": "https://github.com/chajunseok"
+  },
+  "plugins": [
+    {
+      "name": "config-map",
+      "description": "Visualize every local Claude Code config (CLAUDE.md, settings, skills, hooks, plugins, MCP) in one browser view",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

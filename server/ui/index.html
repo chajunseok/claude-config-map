@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claude 설정 지도</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<div id="app">
+  <nav id="activity" aria-label="사이드바 전환">
+    <div id="logo" aria-hidden="true"></div>
+    <div id="views" role="tablist" aria-label="사이드바 목록"></div>
+    <div id="acttools"></div>
+  </nav>
+  <nav id="sidebar" aria-label="사이드바">
+    <div class="pane-hd"><span id="side-title">탐색기</span><span id="side-count" class="cnt"></span></div>
+    <div id="sidetool"></div>
+    <div id="sidectx" hidden></div>
+    <div id="sidebody" role="tabpanel"></div>
+  </nav>
+  <section id="editor">
+    <div id="tabstrip"></div>
+    <div id="pathline"></div>
+    <div id="panel"></div>
+  </section>
+  <aside id="inspector" aria-label="인스펙터">
+    <div class="pane-hd"><span id="ins-title">인스펙터</span></div>
+    <div id="insbody"></div>
+  </aside>
+  <div id="statusbar" aria-label="상태"></div>
+</div>
+<script src="/ui/js/core.js"></script>
+<script src="/ui/js/sidebar.js"></script>
+<script src="/ui/js/editor.js"></script>
+<script src="/ui/js/inspector.js"></script>
+<script src="/ui/js/main.js"></script>
+</body>
+</html>
