@@ -9,17 +9,19 @@ function hms(t){
 }
 // 우측 상태 문구 — 지금 무엇을 보고 있는지 한 줄
 function statusText(){
-  if(S.edit) return "편집 중 · " + baseName(S.edit.path);
+  if(S.edit) return t("편집 중 · {n}", {n:baseName(S.edit.path)});
   if(S.filePath && isCompare(S.filePath))
-    return "비교: " + cmpTitle(S.filePath) + " · " + len(S.file && S.file.matches) + "곳";
+    return t("비교: {t} · {n}곳",
+             {t:cmpTitle(S.filePath), n:len(S.file && S.file.matches)});
   if(S.side === "rules"){
     var n = len(S.eff);
     if(!n) return "";
     var cur = -1;
     S.eff.forEach(function(it, i){ if(it.path === S.filePath) cur = i; });
-    return (cur >= 0 ? (cur+1) + " / " + n : n + " 파일") + " · 아래가 위를 덮어씀";
+    return t("{s} · 아래가 위를 덮어씀",
+             {s: cur >= 0 ? t("{n} / {a}", {n:cur+1, a:n}) : t("{n} 파일", {n:n})});
   }
-  if(S.side === "skills") return "토글 저장 → " + S.toggleTarget;
+  if(S.side === "skills") return t("토글 저장 → {n}", {n:S.toggleTarget});
   if(S.side === "hooks"){
     if(!S.selHook) return "";
     var f = hookFile(S.selHook.source);
@@ -30,7 +32,8 @@ function statusText(){
     return S.selMcp.file ? baseName(S.selMcp.file) : (S.selMcp.label || "");
   }
   if(S.filePath && S.file)
-    return baseName(S.filePath) + " · " + String(S.file.text || "").split("\n").length + "줄";
+    return t("{f} · {n}줄", {f:baseName(S.filePath),
+                                n:String(S.file.text || "").split("\n").length});
   return "";
 }
 function sbtn(text, fn, disabled){
@@ -43,14 +46,14 @@ function renderStatus(){
   var bar = document.getElementById("statusbar");
   if(!bar || S.dead) return;
   clear(bar);
-  bar.appendChild(el("span", null, S.scan ? "스캔 " + hms(S.scan.scanned_at)
-                                          : (S.loading ? "스캔 중…" : "스캔 -")));
+  bar.appendChild(el("span", null, S.scan ? t("스캔 {t}", {t:hms(S.scan.scanned_at)})
+                                          : t(S.loading ? "스캔 중…" : "스캔 -")));
   var c = cmpVer(S.scan && S.scan.claude_version);
   bar.appendChild(el("span", c === null ? "warn" : null,
-    "Claude Code " + (c === null ? "버전 미확인" : S.scan.claude_version)));
+    "Claude Code " + (c === null ? t("버전 미확인") : S.scan.claude_version)));
   var errs = (S.scan && S.scan.errors) || [];
   if(errs.length){
-    var eb = el("button","sbtn err","오류 "+errs.length+"건");
+    var eb = el("button","sbtn err", t("오류 {n}건", {n:errs.length}));
     eb.setAttribute("aria-expanded", String(S.errOpen));
     eb.onclick = function(){ S.errOpen = !S.errOpen; renderInspector(); renderStatus(); };
     bar.appendChild(eb);
@@ -58,10 +61,10 @@ function renderStatus(){
   if(S.msg) bar.appendChild(el("span", "smsg " + (S.msgOk ? "ok" : "err"), S.msg));
   if(S.scanErr) bar.appendChild(retryBtn(loadScan));
   bar.appendChild(el("span","spacer"));
-  var t = statusText();
-  if(t) bar.appendChild(el("span","stxt", t));
-  bar.appendChild(sbtn(S.loading ? "스캔 중…" : "재스캔", loadScan, S.loading));
-  bar.appendChild(sbtn("종료", shutdown));
+  var st = statusText();
+  if(st) bar.appendChild(el("span","stxt", st));
+  bar.appendChild(sbtn(t(S.loading ? "스캔 중…" : "재스캔"), loadScan, S.loading));
+  bar.appendChild(sbtn(t("종료"), shutdown));
 }
 
 async function shutdown(){
@@ -74,13 +77,13 @@ async function shutdown(){
     if(!r.ok || !b || b.ok !== true) fail = (b && b.error) || ("HTTP "+r.status);
   }catch(e){ fail = e.message; }
   if(fail){  // 실패면 UI 유지, 상태바에만 표시
-    S.msg = "종료하지 못했습니다: "+fail; S.msgOk = false;
+    S.msg = t("종료하지 못했습니다: {e}", {e:tMsg(fail)}); S.msgOk = false;
     renderStatus();
     return;
   }
   S.dead = true;
   document.body.textContent = "";
-  var p = el("p",null,"서버가 종료되었습니다");
+  var p = el("p",null, t("서버가 종료되었습니다"));
   p.style.padding = "24px";
   document.body.appendChild(p);
 }
@@ -96,8 +99,8 @@ async function loadScan(){
   renderActivity();
   renderStatus();
   renderInspector();
-  sideBody().appendChild(el("div","pad hint","스캔 중…"));
-  panel().appendChild(el("div","pad hint","스캔 중…"));
+  sideBody().appendChild(el("div","pad hint", t("스캔 중…")));
+  panel().appendChild(el("div","pad hint", t("스캔 중…")));
   var scan = null, err = null;
   try{
     scan = await getJSON(SAMPLE ? "./scan-sample.json" : "/api/scan");
@@ -105,7 +108,7 @@ async function loadScan(){
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
   if(err){  // 이전 스캔 데이터는 유지 — 사이드바도 그대로 두어 에디터와 어긋나지 않게
-    S.msg = "스캔에 실패했습니다: "+err; S.msgOk = false; S.scanErr = true;
+    S.msg = t("스캔에 실패했습니다: {e}", {e:tMsg(err)}); S.msgOk = false; S.scanErr = true;
     renderActivity();
     renderStatus();
     if(S.scan) renderSide();
@@ -131,10 +134,11 @@ async function loadScan(){
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
-    else { S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject; S.msgOk = false; }
+    else { S.msg = t("재스캔 후 프로젝트가 사라져 선택을 해제했습니다: {p}",
+                     {p:prevProject}); S.msgOk = false; }
   }
   if(prevFile && !isCompare(prevFile) && !S.meta[prevFile]){
-    S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
+    S.fileErr = t("재스캔 후 파일이 사라졌습니다: {p}", {p:prevFile});
     prevFile = null;
   }
   if(S.project) loadEff();
@@ -155,6 +159,20 @@ document.addEventListener("keydown", function(ev){
 window.addEventListener("beforeunload", function(ev){
   if(S.edit && S.edit.dirty){ ev.preventDefault(); ev.returnValue = ""; }
 });
+/* 부트 — 정적 HTML 의 한국어 텍스트를 현재 언어로 덮는다 */
+document.documentElement.lang = LANG;
+document.title = t("Claude 설정 지도");
+(function(){
+  function txt(id, s){ var n = document.getElementById(id); if(n) n.textContent = t(s); }
+  function aria(id, s){ var n = document.getElementById(id); if(n) n.setAttribute("aria-label", t(s)); }
+  txt("side-title", "탐색기");
+  txt("ins-title", "인스펙터");
+  aria("activity", "사이드바 전환");
+  aria("views", "사이드바 목록");
+  aria("sidebar", "사이드바");
+  aria("inspector", "인스펙터");
+  aria("statusbar", "상태");
+})();
 renderActivity();
 renderSide();
 renderTabstrip();
