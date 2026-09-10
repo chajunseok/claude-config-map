@@ -476,6 +476,121 @@ class TestEditEndpoints(ServerCase):
         self.assertEqual(json.loads(body)["error"], "not found")
 
 
+class TestToggleEndpoint(ServerCase):
+    """POST /api/toggle 상태 코드 매트릭스."""
+
+    post = TestEditEndpoints.post
+
+    def settings(self, name="settings.local.json"):
+        return self.proj / ".claude" / name
+
+    def toggle(self, **kw):
+        body = {"project": self.proj_path, "section": "skillOverrides",
+                "key": "s1", "value": "off", **kw}
+        return self.post("/api/toggle", body)
+
+    def test_before_scan_is_409(self):
+        code, body, _ = self.toggle()
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_creates_file_and_becomes_readable(self):
+        self.scan()
+        code, body, _ = self.toggle()
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["path"], self.settings().resolve().as_posix())
+        self.assertTrue(d["created"])
+        self.assertIsNone(d["backup"])
+        self.assertEqual((d["section"], d["key"], d["value"]),
+                         ("skillOverrides", "s1", "off"))
+        self.assertEqual(json.loads(self.settings().read_text(encoding="utf-8")),
+                         {"skillOverrides": {"s1": "off"}})
+
+        code, body, _ = get(self.url + "/api/file?path=" + self.settings().as_posix())
+        self.assertEqual(code, 200)
+        self.assertIn("skillOverrides", json.loads(body)["text"])
+
+    def test_second_toggle_backs_up_and_default_deletes(self):
+        self.scan()
+        self.assertEqual(self.toggle()[0], 200)
+        code, body, _ = self.toggle(value="on")
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertFalse(d["created"])
+        self.assertIsNone(d["value"])
+        self.assertTrue(Path(d["backup"]).is_file())
+        self.assertEqual(json.loads(self.settings().read_text(encoding="utf-8")), {})
+
+    def test_plugin_section_and_settings_json_target(self):
+        self.scan()
+        code, body, _ = self.toggle(section="enabledPlugins", key="a@m", value=False,
+                                    target="settings.json")
+        self.assertEqual(code, 200)
+        self.assertFalse(json.loads(body)["value"])
+        self.assertEqual(json.loads(self.settings("settings.json").read_text(encoding="utf-8")),
+                         {"enabledPlugins": {"a@m": False}})
+        self.assertFalse(self.settings().exists())
+
+    def test_unknown_project_is_404(self):
+        self.fake_scan["projects"].append({"path": self.outside.as_posix() + "-gone",
+                                           "exists": False})
+        self.scan()
+        for project in (self.outside.parent.as_posix(), self.outside.as_posix() + "-gone",
+                        "", None):
+            code, body, _ = self.toggle(project=project)
+            self.assertEqual(code, 404, project)
+            self.assertEqual(json.loads(body)["error"], "unknown project")
+
+    def test_invalid_fields_are_400(self):
+        self.scan()
+        cases = [
+            ({"section": "hooks"}, "invalid section"),
+            ({"section": 5}, "invalid section"),
+            ({"target": "settings.other.json"}, "invalid target"),
+            ({"key": ""}, "invalid key"),
+            ({"key": "   "}, "invalid key"),
+            ({"key": 5}, "invalid key"),
+            ({"value": "maybe"}, "invalid value"),
+            ({"value": True}, "invalid value"),
+            ({"section": "enabledPlugins", "key": "a@m", "value": "off"}, "invalid value"),
+            ({"section": "enabledPlugins", "key": "a@m", "value": 1}, "invalid value"),
+        ]
+        for kw, err in cases:
+            code, body, _ = self.toggle(**kw)
+            self.assertEqual(code, 400, kw)
+            self.assertEqual(json.loads(body)["error"], err, kw)
+        self.assertFalse(self.settings().exists())
+
+    def test_broken_settings_file_is_422(self):
+        self.scan()
+        self.settings().parent.mkdir(parents=True, exist_ok=True)
+        self.settings().write_text("{bad", encoding="utf-8")
+        code, body, _ = self.toggle()
+        self.assertEqual(code, 422)
+        d = json.loads(body)
+        self.assertEqual(d["error"], "validation failed")
+        self.assertEqual(d["issues"][0]["rule"], "V1")
+        self.assertEqual(self.settings().read_bytes(), b"{bad")
+
+    def test_save_failure_is_500(self):
+        self.scan()
+        with mock.patch.object(web_server.core, "toggle", side_effect=OSError("boom")):
+            code, body, _ = self.toggle()
+        self.assertEqual(code, 500)
+        self.assertEqual(json.loads(body)["error"], "save failed")
+
+    def test_foreign_origin_is_403(self):
+        self.scan()
+        code, body, _ = self.post("/api/toggle",
+                                  {"project": self.proj_path, "section": "skillOverrides",
+                                   "key": "s1", "value": "off"},
+                                  headers={"Origin": "http://evil.example"})
+        self.assertEqual(code, 403)
+        self.assertEqual(json.loads(body)["error"], "forbidden origin")
+        self.assertFalse(self.settings().exists())
+
+
 class TestVersionGuard(unittest.TestCase):
     """sys.version_info는 patch가 어려워 소스 배치만 검증한다 (가드가 import보다 먼저)."""
 

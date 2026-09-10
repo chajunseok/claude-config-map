@@ -100,7 +100,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .rule pre{margin:0;padding:10px;font:12px/1.7 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;color:var(--fg)}
 /* 스킬 뷰 */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-items:start}
-.card{display:block;width:100%;text-align:left;border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0}
+.card{display:block;width:100%;text-align:left;border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0;cursor:pointer}
+.card:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
 .card:hover{background:var(--hover)}
 /* OFF 카드: 텍스트 대비는 유지하고 배경/경계선만 흐리게 */
 .card.dim{border-style:dashed;border-color:var(--muted)}
@@ -111,10 +112,23 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .badge.k-skill{color:var(--green);border-color:var(--green)}
 .badge.k-agent{color:var(--acc);border-color:var(--acc)}
 .badge.k-command{color:var(--warn);border-color:var(--warn)}
-/* 출처별 섹션 */
-.cardsec{display:flex;align-items:center;gap:6px;width:100%;text-align:left;margin:14px 0 6px;font-weight:600}
-.cardsec:first-child{margin-top:0}
+/* 출처별 섹션 — 헤더 줄은 래퍼(접기 버튼 + 플러그인 스위치), 중첩 button 금지 */
+.cardsechd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 6px}
+.cardsechd:first-child{margin-top:0}
+.cardsec{display:flex;align-items:center;gap:6px;flex:1;min-width:0;text-align:left;margin:0;font-weight:600}
 .cardsec .arw{width:12px;height:auto;line-height:inherit}
+/* 토글 컨트롤 */
+.ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.card .ctl{margin-top:6px}
+.switch{border:1px solid var(--bd);border-radius:10px;padding:1px 10px;font-size:11px;color:var(--muted);background:var(--bg)}
+.switch[aria-checked=true]{color:var(--green);border-color:var(--green)}
+.switch[aria-checked=false]{color:var(--err);border-color:var(--err)}
+.switch[disabled]{color:var(--muted);border-color:var(--bd);cursor:default}
+select.lvl,select.tgt{font:inherit;color:var(--fg);background:var(--ed);border:1px solid var(--bd);border-radius:4px;max-width:100%}
+select.lvl{font-size:11px;padding:1px 4px}
+select.tgt{padding:3px 6px}
+select[disabled]{color:var(--muted);cursor:default}
+.togglemsg{padding:5px 10px;border-bottom:1px solid var(--bd);color:var(--err);word-break:break-all}
 .tbar input[type=search]{flex:1;min-width:120px;max-width:260px;font:inherit;color:var(--fg);
       background:var(--ed);border:1px solid var(--bd);border-radius:4px;padding:3px 8px}
 .tbar .chip{color:var(--muted)}
@@ -232,6 +246,8 @@ var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:n
          eff:null, effErr:null, errOpen:false,
          // cardq: 스킬 뷰 검색·종류 필터. 재스캔·프로젝트 전환에도 유지 (loadScan 이 건드리지 않음)
          cardq:{q:"", kinds:{skill:true, agent:true, command:true}},
+         // toggleTarget: 토글 저장 대상 파일. toggleErr: 직전 토글 실패 메시지 (툴바 아래 한 줄)
+         toggleTarget:"settings.local.json", toggleErr:null,
          // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls}
          edit:null, issues:null};
 function stale(seq){ return S.dead || seq !== S.seq; }
@@ -312,6 +328,37 @@ function overrideKey(f, kind){
   return name.replace(/\.[^.\\/]+$/,"");
 }
 function pluginOff(pl){ return enabledPlugins()[pl.key] === false; }
+// 병합값의 출처 — mergedSetting 과 같은 순서로 훑고 마지막에 이긴 파일을 돌려준다.
+// 없으면 null (= 기본값). 전역 두 파일은 묶어서 "전역 설정".
+function settingSource(section, key){
+  var found = null;
+  function look(obj, glabel){
+    var all = settingsData(obj);
+    ["settings.json","settings.local.json"].forEach(function(k){
+      var v = all[k] && all[k][section];
+      if(v && typeof v === "object" && Object.prototype.hasOwnProperty.call(v, key))
+        found = {value:v[key], file:k, label: glabel || (k === "settings.json" ? "팀 설정" : "개인 설정")};
+    });
+  }
+  if(S.scan && S.scan.global) look(S.scan.global.settings, "전역 설정");
+  if(S.project && S.project.exists !== false) look(S.project.settings, null);
+  return found;
+}
+// 토글 가능 = 존재하는 프로젝트가 선택돼 있을 때만
+function toggleReady(){ return !!(S.project && S.project.exists !== false); }
+// 프로젝트 settings 두 파일에 실제로 적힌 토글 키 수 (전역 제외)
+function projToggleCount(p){
+  var all = settingsData(p.settings), out = {skills:0, plugins:0};
+  [["skillOverrides","skills"],["enabledPlugins","plugins"]].forEach(function(pair){
+    var seen = Object.create(null);
+    ["settings.json","settings.local.json"].forEach(function(k){
+      var v = all[k] && all[k][pair[0]];
+      if(v && typeof v === "object") keys(v).forEach(function(n){ seen[n] = true; });
+    });
+    out[pair[1]] = keys(seen).length;
+  });
+  return out;
+}
 
 /* ---------- 스캔 인덱스 (경로 → 표시용 메타) ---------- */
 // 재스캔 후 선택 복원 + 인스펙터 속성 표시. API 계약의 "직전 스캔에 등장한 경로"와 동일 범위.
@@ -986,7 +1033,7 @@ function collect(){
       if(kind === "skill" && !isSkillFile(f)) return;
       var key = overrideKey(f, kind);
       out.push({name:f.name_meta || key, kind:kind, origin:origin, rank:rankOf(kind, scope),
-                desc:f.description, path:f.path,
+                desc:f.description, path:f.path, key:key, pluginOwned: scope === 2,
                 off: extra ? extra.off : (kind !== "agent" && ov[key] === "off"),
                 offLabel: extra ? extra.offLabel : "이 프로젝트에서 OFF"});
     });
@@ -1041,33 +1088,143 @@ function cardBar(){
     };
     bar.appendChild(b);
   });
+  var tgt = el("select","tgt");
+  [["settings.local.json","settings.local.json (개인, 기본)"],
+   ["settings.json","settings.json (팀 공유)"]].forEach(function(o){
+    var op = el("option", null, o[1]);
+    op.value = o[0];
+    tgt.appendChild(op);
+  });
+  tgt.value = S.toggleTarget;
+  tgt.disabled = !toggleReady();
+  tgt.setAttribute("aria-label","토글 저장 대상 파일");
+  tgt.onchange = function(){ S.toggleTarget = tgt.value; renderToggleNotes(); };
+  bar.appendChild(el("span","hint","저장 대상"));
+  bar.appendChild(tgt);
+  if(!toggleReady())
+    bar.appendChild(el("span","hint", S.project ? "선택 프로젝트 경로 없음 — 토글 불가"
+                                                : "토글하려면 탐색기에서 프로젝트를 선택하세요"));
   var cnt = el("span","hint");
   cnt.id = "cardcount";
   bar.appendChild(cnt);
   return bar;
+}
+// 툴바 아래 경고·오류 줄 — 카드 본문과 따로 갱신한다
+function toggleNotes(){
+  var box = el("div");
+  box.id = "togglenotes";
+  renderToggleNotes(box);
+  return box;
+}
+function renderToggleNotes(box){
+  box = box || document.getElementById("togglenotes");
+  if(!box) return;
+  clear(box);
+  if(S.toggleTarget === "settings.json")
+    box.appendChild(el("div","sharewarn","git 추적 파일 — 커밋하면 팀 전체에 적용됨"));
+  var c = cmpVer(S.scan && S.scan.claude_version);
+  if(c === null) box.appendChild(el("div","sharewarn","Claude Code 버전 미확인 — 스킬 토글 지원 여부 확인 불가"));
+  else if(c < 0) box.appendChild(el("div","sharewarn","Claude Code 스킬 토글 미지원 버전 — 토글해도 적용되지 않을 수 있음"));
+  if(S.toggleErr) box.appendChild(el("div","togglemsg", S.toggleErr));
+}
+// 컨트롤 변경 → POST /api/toggle → 200이면 재스캔, 실패면 오류 줄 + 컨트롤 원복
+async function doToggle(section, key, value, ctrls){
+  if(!toggleReady()) return;
+  S.toggleErr = null;
+  ctrls.forEach(function(c){ c.disabled = true; });
+  renderToggleNotes();
+  var sseq = S.sseq, res = null, err = null;
+  try{
+    res = await postJSON("/api/toggle", {project:S.project.path, section:section, key:key,
+                                         value:value, target:S.toggleTarget});
+  }catch(ex){ err = ex.message; }
+  if(S.dead || sseq !== S.sseq) return;
+  if(!err && res.status === 200){ loadScan(); return; }
+  S.toggleErr = "토글하지 못했습니다: "
+    + (err || ("HTTP " + res.status + " — " + ((res.body && res.body.error) || "요청 실패")));
+  renderCardBody();      // 컨트롤 원복 = 현재 스캔 값 기준 재렌더
+  renderToggleNotes();
 }
 function renderCards(){
   var p = panel();
   p.appendChild(el("div","pad")).appendChild(viewHint(VIEW_HINT.cards));
   if(!S.scan) return;
   p.appendChild(cardBar());
+  p.appendChild(toggleNotes());
   var body = el("div","pad");
   body.id = "cardbody";
   p.appendChild(body);
   renderCardBody();
 }
+var LEVELS = [["on","on (제한 없음)"],["name-only","name-only (이름만)"],
+              ["user-invocable-only","user-invocable-only (사용자 호출만)"],["off","off (사용 안 함)"]];
+// 스킬·커맨드 카드의 토글 줄. 카드 클릭(원문 열기)과 겹치지 않게 stopPropagation.
+function skillCtrls(c){
+  var row = el("div","ctl"), cur = skillOverrides()[c.key] || "on", on = cur !== "off";
+  var sw = el("button","switch", on ? "ON" : "OFF");
+  sw.setAttribute("role","switch");
+  sw.setAttribute("aria-checked", String(on));
+  sw.setAttribute("aria-label", c.name + " — 이 프로젝트에서 사용");
+  sw.title = "이 프로젝트에서 사용";
+  var sel = el("select","lvl");
+  LEVELS.forEach(function(o){
+    var op = el("option", null, o[1]);
+    op.value = o[0];
+    sel.appendChild(op);
+  });
+  sel.value = cur;
+  sel.setAttribute("aria-label", c.name + " 사용 범위");
+  var ctrls = [sw, sel], dis = !toggleReady();
+  sw.disabled = dis; sel.disabled = dis;
+  sw.onclick = function(ev){ ev.stopPropagation(); doToggle("skillOverrides", c.key, on ? "off" : "on", ctrls); };
+  sel.onclick = function(ev){ ev.stopPropagation(); };
+  sel.onchange = function(ev){ ev.stopPropagation(); doToggle("skillOverrides", c.key, sel.value, ctrls); };
+  row.appendChild(sw);
+  row.appendChild(sel);
+  var src = settingSource("skillOverrides", c.key);
+  if(src) row.appendChild(badge(src.label));
+  return row;
+}
 function cardEl(c){
   // ponytail: 출처는 섹션 헤더가 말해주므로 카드에서 뺐다
-  var card = el("button","card"+(c.off?" dim":""));
+  // 카드 안에 컨트롤 button/select 이 들어가므로 카드 자체는 div[role=button]
+  var card = el("div","card"+(c.off?" dim":""));
+  card.setAttribute("role","button");
+  card.tabIndex = 0;
   var hd = el("div","chd");
   hd.appendChild(el("h4", null, c.name));
   hd.appendChild(badge(KIND_KO[c.kind] || c.kind, "k-"+c.kind));
   if(c.off) hd.appendChild(badge(c.offLabel || "OFF","off"));
+  if(c.pluginOwned) hd.title = "플러그인 단위로만 설정";
   card.appendChild(hd);
   card.appendChild(el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음"));
+  // 에이전트는 skillOverrides 대상이 아니고, 플러그인 내부 항목은 플러그인 단위로만 켜고 끈다
+  if(c.kind !== "agent" && !c.pluginOwned) card.appendChild(skillCtrls(c));
   card.title = c.path;
   card.onclick = function(){ openFile(c.path); };
+  card.onkeydown = function(ev){
+    if(ev.target !== card) return;   // 컨트롤에서 올라온 키는 그대로 둔다
+    if(ev.key !== "Enter" && ev.key !== " ") return;
+    ev.preventDefault();
+    openFile(c.path);
+  };
   return card;
+}
+// 플러그인 섹션 헤더의 ON/OFF — enabledPlugins 는 플러그인 단위
+function pluginSwitch(pl){
+  var on = !pluginOff(pl);
+  var b = el("button","switch", on ? "ON" : "OFF");
+  b.setAttribute("role","switch");
+  b.setAttribute("aria-checked", String(on));
+  b.setAttribute("aria-label", (pl.name || pl.key) + " — 이 프로젝트에서 플러그인 사용");
+  b.title = "이 프로젝트에서 플러그인 사용";
+  b.disabled = !toggleReady();
+  b.onclick = function(){ doToggle("enabledPlugins", pl.key, on ? false : true, [b]); };
+  var wrap = el("span","ctl");
+  wrap.appendChild(b);
+  var src = settingSource("enabledPlugins", pl.key);
+  if(src) wrap.appendChild(badge(src.label));
+  return wrap;
 }
 function renderCardBody(){
   var body = document.getElementById("cardbody");
@@ -1077,8 +1234,8 @@ function renderCardBody(){
   var cnt = document.getElementById("cardcount");
   if(cnt) cnt.textContent = "표시 " + shown.length + " / 전체 " + all.length
     + (S.project && S.project.exists === false ? " · 선택 프로젝트 경로 없음" : "");
-  var pOff = Object.create(null);
-  ((S.scan && S.scan.plugins) || []).forEach(function(pl){ pOff[pl.name || pl.key] = pluginOff(pl); });
+  var pMap = Object.create(null);
+  ((S.scan && S.scan.plugins) || []).forEach(function(pl){ pMap[pl.name || pl.key] = pl; });
   var order = [], by = Object.create(null);
   shown.forEach(function(c){
     var s = cardSrc(c);
@@ -1096,9 +1253,13 @@ function renderCardBody(){
     h.setAttribute("aria-expanded", String(open));
     h.appendChild(el("span","arw", open ? "▾" : "▸"));
     h.appendChild(el("span", null, sec.src.label + " (" + sec.items.length + ")"));
-    if(sec.src.plugin && pOff[sec.src.plugin]) h.appendChild(badge("플러그인 OFF","off"));
+    var pl = sec.src.plugin ? pMap[sec.src.plugin] : null;
+    if(pl && pluginOff(pl)) h.appendChild(badge("플러그인 OFF","off"));
     h.onclick = function(){ S.expanded[id] = !isOpen(id, dflt); renderCardBody(); };
-    body.appendChild(h);
+    var hw = el("div","cardsechd");
+    hw.appendChild(h);
+    if(pl && pl.exists !== false) hw.appendChild(pluginSwitch(pl));
+    body.appendChild(hw);
     if(!open) return;
     var grid = el("div","cards");
     sec.items.forEach(function(c){ grid.appendChild(cardEl(c)); });
@@ -1303,6 +1464,8 @@ function renderInspector(){
         : "전체", p.coverage === "root-only" ? "warn" : null);
       if(p.truncated || p.incomplete) kvRow(g2, "완결성", "일부만 스캔", "warn");
       kvRow(g2, "git", p.git ? "예" : "아니오");
+      var tc = projToggleCount(p);
+      kvRow(g2, "이 프로젝트 토글", "스킬 " + tc.skills + " · 플러그인 " + tc.plugins);
     }
   }
   if(!any) ps.appendChild(el("div","hint","파일이나 프로젝트를 선택하면 속성이 표시됩니다."));

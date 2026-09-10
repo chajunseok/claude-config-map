@@ -43,13 +43,17 @@ Claude Code 세션에서 아래 두 줄을 실행한다.
   | V7 | — | 모든 저장 | 읽은 뒤 디스크에서 파일이 바뀌었으면 저장을 막고 다시 읽기를 요구 |
 
 - **저장·백업** — 저장은 원자적으로 쓰고, 원본 줄바꿈(CRLF/LF)과 BOM을 그대로 보존한다. 쓰기 전 원본을 `~/.claude/config-map/backups/<경로 해시>/` 아래에 복사하며, 파일당 최근 10개만 남긴다.
+- **토글** — 스킬 뷰에서 이 프로젝트의 스킬·커맨드를 ON/OFF 하거나 4단계(`on` · `name-only` · `user-invocable-only` · `off`)로 지정한다. 플러그인은 섹션 헤더에서 **플러그인 단위로만** 켜고 끈다(플러그인 내부 스킬 개별 토글은 없다). 에이전트는 토글 대상이 아니다.
 
-스킬 on/off 토글은 이후 버전이다.
+  - 토글하려면 탐색기에서 프로젝트를 먼저 선택해야 한다. 전역 설정 토글은 지원하지 않는다.
+  - 저장 대상은 기본이 프로젝트의 `.claude/settings.local.json`(개인)이고, 툴바에서 `.claude/settings.json`(팀 공유)으로 바꿀 수 있다. 팀 공유를 고르면 "커밋하면 팀 전체에 적용됨" 경고가 뜬다.
+  - 현재 값 옆 배지가 그 값이 온 곳을 알려준다 — **전역 설정** / **팀 설정**(프로젝트 `settings.json`) / **개인 설정**(프로젝트 `settings.local.json`). 배지가 없으면 기본값이다.
+  - 대상 파일이 없으면 만든다. 있으면 **JSON을 다시 직렬화**하므로 들여쓰기·주석 등 원본 포맷이 바뀔 수 있다. 쓰기 전 백업은 편집과 같은 규칙으로 남는다.
 
 ## 이 버전이 쓰는 파일
 
 - **읽기** — 스캔 대상 전부: `~/.claude/` 아래 CLAUDE.md·rules·settings·skills·agents·commands·plugins, `~/.claude.json` 의 프로젝트 목록과 각 프로젝트의 `.claude/` 및 `CLAUDE.md`·`.mcp.json`.
-- **쓰기** — 사용자가 UI에서 직접 저장한 파일, 그 파일의 백업(`~/.claude/config-map/backups/…`), 서버 접속 정보(`~/.claude/config-map/server.json`). 그 밖의 파일은 쓰지 않는다.
+- **쓰기** — 사용자가 UI에서 직접 저장한 파일, 토글이 쓰는 선택 프로젝트의 `.claude/settings.local.json` 또는 `.claude/settings.json`(없으면 생성), 그 파일들의 백업(`~/.claude/config-map/backups/…`), 서버 접속 정보(`~/.claude/config-map/server.json`). 그 밖의 파일은 쓰지 않는다.
 
 ## 검증된 OS
 
