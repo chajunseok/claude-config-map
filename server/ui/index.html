@@ -28,13 +28,13 @@
 html,body{height:100%}
 body{margin:0;font:13px/1.5 var(--sans);color:var(--fg);background:var(--bg)}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
-/* 스크롤바: 토큰으로 통일 — #tree·#panel·#tabstrip·#inspector·.card .desc·textarea.ta 모두 * 로 덮인다 */
+/* 스크롤바: 토큰으로 통일 — #sidebody·#panel·#tabstrip·#inspector·.desc·textarea.ta 모두 * 로 덮인다 */
 *{scrollbar-width:thin;scrollbar-color:var(--bd) transparent}
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
 ::-webkit-scrollbar-thumb:hover{background:var(--muted)}
-#app{display:grid;grid-template-columns:48px 260px 1fr 260px;height:100vh;overflow:hidden}
+#app{display:grid;grid-template-columns:48px 300px 1fr 260px;height:100vh;overflow:hidden}
 
 /* ---- 액티비티 바 ---- */
 #activity{background:var(--bar);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;overflow:hidden}
@@ -44,10 +44,26 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #views button:hover{background:var(--hover);color:var(--fg)}
 #views button[aria-selected=true]{background:var(--bd);color:var(--fg);font-weight:700}
 
-/* ---- 탐색기 ---- */
-#explorer{border-right:1px solid var(--bd);min-width:0;display:flex;flex-direction:column;overflow:hidden}
+/* ---- 사이드바 (액티비티 바가 내용을 바꾼다) ---- */
+#sidebar{border-right:1px solid var(--bd);min-width:0;display:flex;flex-direction:column;overflow:hidden}
 .pane-hd{display:flex;justify-content:space-between;gap:8px;padding:8px 10px;font-size:11px;color:var(--muted);letter-spacing:.06em;border-bottom:1px solid var(--bd);flex:none}
-#tree{overflow:auto;flex:1;padding:4px 0;font-size:12.5px}
+#sidehint{flex:none;font-size:11px;color:var(--muted);padding:6px 10px;border-bottom:1px solid var(--bd)}
+#sidebody{overflow:auto;flex:1;padding:4px 0;font-size:12.5px}
+/* 목록 행: 본문 버튼 + (스킬이면) 오른쪽 스위치 — 중첩 button 금지 */
+.sechd{margin:10px 10px 4px;font-weight:600;font-size:12px}
+#sidebody>.sechd:first-child{margin-top:4px}
+.sitem{display:flex;align-items:center;gap:4px;border-left:3px solid transparent;padding-right:6px;min-width:0}
+.sitem:hover{background:var(--hover)}
+.sitem.sel{background:var(--sel)}
+.sitem.sel .t{color:var(--selfg)}
+.sitem.global{border-left-color:var(--acc)}
+.sitem.project{border-left-color:var(--green)}
+.sitem.plugin{border-left-color:var(--purple)}
+.srow{flex:1;min-width:0;text-align:left;padding:4px 4px 4px 8px}
+.srow .l1{display:flex;align-items:center;gap:6px;min-width:0}
+.srow .l2{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px}
+.srow .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sitem.dim .t{color:var(--muted)}
 .row{display:flex;align-items:center;height:24px;border-left:2px solid transparent}
 .row.d1,.row.d2,.row.d3{border-left-color:var(--bd)}
 .row:hover{background:var(--hover)}
@@ -85,41 +101,26 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* 뷰 역할 한 줄 설명 */
 .vhint{font-size:12px;margin:0 0 10px}
 .err{color:var(--err)}
-.p{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
 .badge{display:inline-block;border:1px solid var(--bd);border-radius:10px;padding:0 7px;font-size:11px;color:var(--muted);white-space:nowrap}
 .badge.warn{color:var(--warn);border-color:var(--warn)}
 .badge.shared{color:var(--green);border-color:var(--green)}
 .badge.off{color:var(--err);border-color:var(--err)}
-/* 규칙 뷰 */
-.rule{border:1px solid var(--bd);border-radius:6px;margin-bottom:10px;overflow:hidden}
-.rule.lazy{border-color:var(--warn)}
-.rule>.rhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--bg)}
+/* 규칙 사이드바 순번 */
 .rnum{width:20px;height:20px;flex:none;border-radius:50%;border:1px solid var(--acc);color:var(--acc);font:11px/18px var(--mono);text-align:center}
-.rule details{border-top:1px solid var(--bd)}
-.rule summary{padding:5px 10px;color:var(--muted);font-size:12px;cursor:pointer}
-.rule pre{margin:0;padding:10px;font:12px/1.7 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;color:var(--fg)}
-/* 스킬 뷰 */
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-items:start}
-.card{display:block;width:100%;text-align:left;border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0;cursor:pointer}
-.card:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
-.card:hover{background:var(--hover)}
-/* OFF 카드: 텍스트 대비는 유지하고 배경/경계선만 흐리게 */
-.card.dim{border-style:dashed;border-color:var(--muted)}
-.card .chd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
-.card h4{margin:0;flex:1;min-width:0;font-size:14px;font-weight:600;word-break:break-all}
-.card .desc{font-size:12px;max-height:9em;overflow:auto;color:var(--val)}
-.card .desc.none{color:var(--muted)}
+/* 인스펙터 설명 본문 */
+.desc{font-size:12px;max-height:12em;overflow:auto;color:var(--val);word-break:break-word}
+.desc.none{color:var(--muted)}
+pre.cfg{margin:0;max-height:16em;overflow:auto;font:11px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all;color:var(--val)}
 .badge.k-skill{color:var(--green);border-color:var(--green)}
 .badge.k-agent{color:var(--acc);border-color:var(--acc)}
 .badge.k-command{color:var(--warn);border-color:var(--warn)}
 /* 출처별 섹션 — 헤더 줄은 래퍼(접기 버튼 + 플러그인 스위치), 중첩 button 금지 */
-.cardsechd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 6px}
-.cardsechd:first-child{margin-top:0}
+.cardsechd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 8px 4px}
+#cardbody>.cardsechd:first-child{margin-top:4px}
 .cardsec{display:flex;align-items:center;gap:6px;flex:1;min-width:0;text-align:left;margin:0;font-weight:600}
 .cardsec .arw{width:12px;height:auto;line-height:inherit}
 /* 토글 컨트롤 */
 .ctl{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.card .ctl{margin-top:6px}
 .switch{border:1px solid var(--bd);border-radius:10px;padding:1px 10px;font-size:11px;color:var(--muted);background:var(--bg)}
 .switch[aria-checked=true]{color:var(--green);border-color:var(--green)}
 .switch[aria-checked=false]{color:var(--err);border-color:var(--err)}
@@ -129,24 +130,12 @@ select.lvl{font-size:11px;padding:1px 4px}
 select.tgt{padding:3px 6px}
 select[disabled]{color:var(--muted);cursor:default}
 .togglemsg{padding:5px 10px;border-bottom:1px solid var(--bd);color:var(--err);word-break:break-all}
-.tbar input[type=search]{flex:1;min-width:120px;max-width:260px;font:inherit;color:var(--fg);
+.tbar input[type=search]{flex:1;min-width:100px;max-width:100%;font:inherit;color:var(--fg);
       background:var(--ed);border:1px solid var(--bd);border-radius:4px;padding:3px 8px}
 .tbar .chip{color:var(--muted)}
 .tbar .chip[aria-pressed=true]{background:var(--sel);color:var(--selfg);border-color:var(--acc)}
-/* 훅 뷰 */
-.hookev{margin:14px 0 6px;font-weight:600}
-.hookrow{border-left:3px solid var(--bd);padding:5px 10px;margin:5px 0;background:var(--bg);border-radius:0 4px 4px 0}
-.hookrow.global{border-left-color:var(--acc)}
-.hookrow.project{border-left-color:var(--green)}
-.hookrow.plugin{border-left-color:var(--purple)}
-.hookrow .cmd{font-family:var(--mono);font-size:11px;word-break:break-all;margin-left:12px;color:var(--val)}
-/* MCP 뷰 */
-.tblwrap{overflow-x:auto;margin-bottom:14px}
-table{border-collapse:collapse;width:100%}
-th,td{border:1px solid var(--bd);padding:4px 6px;text-align:left;vertical-align:top;word-break:break-all;font-size:12px}
-th{background:var(--bg);color:var(--muted);font-weight:600}
-td pre{margin:0;font:11px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all}
-h3{font-size:13px;margin:14px 0 6px}
+/* 훅 명령 목록 (인스펙터) */
+.cmd{font-family:var(--mono);font-size:11px;word-break:break-all;color:var(--val)}
 
 /* ---- 인스펙터 ---- */
 #inspector{border-left:1px solid var(--bd);padding:14px 16px;font-size:12px;display:flex;flex-direction:column;gap:18px;overflow:auto;min-width:0}
@@ -193,9 +182,9 @@ textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none
 .iss .rl{font:11px/1.5 var(--mono);color:var(--muted);margin-right:6px}
 
 @media (max-width:900px){
-  #app{grid-template-columns:48px 200px 1fr;grid-template-rows:1fr auto}
+  #app{grid-template-columns:48px 220px 1fr;grid-template-rows:1fr auto}
   #activity{grid-row:1/3}
-  #explorer{grid-row:1/3}
+  #sidebar{grid-row:1/3}
   #editor{grid-column:3;grid-row:1}
   #inspector{grid-column:3;grid-row:2;border-left:0;border-top:1px solid var(--bd);max-height:42vh}
 }
@@ -203,18 +192,19 @@ textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none
 </head>
 <body>
 <div id="app">
-  <nav id="activity" aria-label="뷰 전환">
+  <nav id="activity" aria-label="사이드바 전환">
     <div id="logo" aria-hidden="true"></div>
-    <div id="views" role="tablist" aria-label="상세 보기"></div>
+    <div id="views" role="tablist" aria-label="사이드바 목록"></div>
   </nav>
-  <nav id="explorer" aria-label="설정 트리">
-    <div class="pane-hd"><span>탐색기</span><span id="exp-count"></span></div>
-    <div id="tree"></div>
+  <nav id="sidebar" aria-label="사이드바">
+    <div class="pane-hd"><span id="side-title">탐색기</span><span id="side-count"></span></div>
+    <div id="sidehint"></div>
+    <div id="sidebody" role="tabpanel"></div>
   </nav>
   <section id="editor">
     <div id="tabstrip"></div>
     <div id="pathline"></div>
-    <div id="panel" role="tabpanel"></div>
+    <div id="panel"></div>
   </section>
   <aside id="inspector" aria-label="인스펙터"></aside>
 </div>
@@ -222,13 +212,14 @@ textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none
 "use strict";
 // ponytail: 상태는 scan 응답 하나. 라우터·프레임워크 없음.
 var MIN_VER = [2,1,199];
-var VIEWS = [["raw","파일"],["eff","규칙"],["cards","스킬"],["hooks","훅"],["mcp","MCP"]];
-var VIEW_TITLE = {raw:"파일", eff:"규칙", cards:"스킬·에이전트·커맨드", hooks:"훅 흐름", mcp:"MCP"};
-// 뷰 역할 한 줄 설명 — 패널 상단 문구와 액티비티 바 툴팁이 같은 문장을 쓴다
+// 액티비티 바 = 사이드바 내용 전환. 에디터는 언제나 열린 파일의 원문.
+var VIEWS = [["files","파일"],["rules","규칙"],["skills","스킬"],["hooks","훅"],["mcp","MCP"]];
+var VIEW_TITLE = {files:"탐색기", rules:"규칙", skills:"스킬·에이전트·커맨드", hooks:"훅", mcp:"MCP"};
+// 사이드바 역할 한 줄 설명 — 사이드바 상단 문구와 액티비티 바 툴팁이 같은 문장을 쓴다
 var VIEW_HINT = {
-  raw:"탐색기에서 고른 파일의 원문. 편집·검증·저장 가능",
-  eff:"프로젝트에 실제로 적용되는 CLAUDE.md 체인 — 적용 순서대로",
-  cards:"전역 · 이 프로젝트 · 플러그인의 스킬/에이전트/커맨드와 이 프로젝트에서의 ON/OFF",
+  files:"전역 · 프로젝트 · 플러그인 설정 파일 트리. 클릭하면 에디터에서 원문·편집",
+  rules:"선택 프로젝트에 실제로 적용되는 CLAUDE.md 체인 — 적용 순서대로",
+  skills:"전역 · 이 프로젝트 · 플러그인의 스킬/에이전트/커맨드와 이 프로젝트에서의 ON/OFF",
   hooks:"settings.json 훅을 이벤트별 매처 → 명령 순서로. 색은 출처(전역/프로젝트/플러그인)",
   mcp:"MCP 서버를 출처별로"};
 var KIND_KO = {skill:"스킬", agent:"에이전트", command:"커맨드"};
@@ -238,19 +229,19 @@ var SCOPE_KO = {global:"전역",
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
 var MAX_TABS = 6;
 var MAX_LINE_ROWS = 2000;
-// seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관), fseq: 파일 세대, eseq: 유효 규칙 세대
-// dead: 서버 종료 후 렌더 중단
-var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null, msgOk:false,
-         seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
+// sseq: 스캔 세대, fseq: 파일 세대, eseq: 유효 규칙 세대 / dead: 서버 종료 후 렌더 중단
+// side: 사이드바 내용 ("files"|"rules"|"skills"|"hooks"|"mcp") — 에디터와 무관
+// selHook/selMcp: 훅·MCP 사이드바에서 고른 항목 (인스펙터 표시용)
+var S = {scan:null, project:null, side:"files", file:null, fileErr:null, filePath:null, msg:null, msgOk:false,
+         fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
          tabs:[], meta:Object.create(null), expanded:Object.create(null),
-         eff:null, effErr:null, errOpen:false,
+         eff:null, effErr:null, errOpen:false, selHook:null, selMcp:null,
          // cardq: 스킬 뷰 검색·종류 필터. 재스캔·프로젝트 전환에도 유지 (loadScan 이 건드리지 않음)
          cardq:{q:"", kinds:{skill:true, agent:true, command:true}},
          // toggleTarget: 토글 저장 대상 파일. toggleErr: 직전 토글 실패 메시지 (툴바 아래 한 줄)
          toggleTarget:"settings.local.json", toggleErr:null,
          // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls}
          edit:null, issues:null};
-function stale(seq){ return S.dead || seq !== S.seq; }
 function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
@@ -432,27 +423,25 @@ function renderActivity(){
   VIEWS.forEach(function(v){
     var b = el("button", null, v[1]);
     b.setAttribute("role","tab");
-    b.setAttribute("aria-selected", String(S.tab === v[0]));
-    b.setAttribute("aria-controls","panel");
+    b.setAttribute("aria-selected", String(S.side === v[0]));
+    b.setAttribute("aria-controls","sidebody");
     b.id = "tab-"+v[0];
     b.title = VIEW_TITLE[v[0]] + " — " + VIEW_HINT[v[0]];
-    b.onclick = function(){ setTab(v[0]); };
+    b.onclick = function(){ setSide(v[0]); };
     bar.appendChild(b);
   });
-  document.getElementById("panel").setAttribute("aria-labelledby","tab-"+S.tab);
+  document.getElementById("sidebody").setAttribute("aria-labelledby","tab-"+S.side);
 }
-function setTab(name){
-  if(name !== "raw" && !guardEdit()) return;   // 원문 뷰 안에서의 전환은 편집을 건드리지 않는다
-  S.seq++;  // 뷰 전환 = 이전 요청 무효
-  S.tab = name;
+// 사이드바 전환은 에디터를 건드리지 않는다 — 편집 중에도 목록 탐색 가능
+function setSide(name){
+  S.side = name;
   renderActivity();
-  renderTabstrip();
-  renderPanel();
+  renderSide();
 }
 
 /* ---------- 탐색기 트리 ---------- */
 function isOpen(id, dflt){ var v = S.expanded[id]; return v === undefined ? !!dflt : v; }
-function setOpen(id, dflt){ S.expanded[id] = !isOpen(id, dflt); renderTree(); }
+function setOpen(id, dflt){ S.expanded[id] = !isOpen(id, dflt); renderSide(); }
 function rowEl(depth){
   var d = el("div","row d"+depth);
   d.style.paddingLeft = (6 + depth*14) + "px";
@@ -535,22 +524,30 @@ function globalCount(g){
 function projCount(p){
   return len(p.claude_md) + len(p.rules) + keys(p.settings).length + len(p.skills) + len(p.agents) + len(p.commands);
 }
-// 재렌더 시 포커스 행 유지 — data-key 로 같은 버튼을 다시 찾는다
-function renderTree(){
-  var t = document.getElementById("tree"), a = document.activeElement;
-  var k = (a && t.contains(a)) ? a.getAttribute("data-key") : null;
-  renderTreeBody();
+function sideBody(){ return clear(document.getElementById("sidebody")); }
+function sideCount(text){ document.getElementById("side-count").textContent = text || ""; }
+// 사이드바 다시 그리기 — 재렌더 시 포커스 행 유지 (data-key 로 같은 버튼을 다시 찾는다)
+function renderSide(){
+  var host = document.getElementById("sidebody"), a = document.activeElement;
+  var k = (a && host.contains(a)) ? a.getAttribute("data-key") : null;
+  document.getElementById("side-title").textContent = VIEW_TITLE[S.side] || "";
+  document.getElementById("sidehint").textContent = VIEW_HINT[S.side] || "";
+  sideCount("");
+  clear(host);
+  if(S.side === "files") renderTreeBody(host);
+  else if(S.side === "rules") renderRulesSide(host);
+  else if(S.side === "skills") renderSkillsSide(host);
+  else if(S.side === "hooks") renderHooksSide(host);
+  else renderMcpSide(host);
   if(!k) return;
-  var all = t.querySelectorAll("[data-key]");
+  var all = host.querySelectorAll("[data-key]");
   for(var i=0;i<all.length;i++){ if(all[i].getAttribute("data-key") === k){ all[i].focus(); return; } }
 }
-function renderTreeBody(){
-  var root = clear(document.getElementById("tree"));
-  var cnt = document.getElementById("exp-count");
-  if(!S.scan){ cnt.textContent = ""; return; }
+function renderTreeBody(root){
+  if(!S.scan) return;
   var g = S.scan.global || {};
   var projects = S.scan.projects || [], plugins = S.scan.plugins || [];
-  cnt.textContent = projects.length + " 프로젝트";
+  sideCount(projects.length + " 프로젝트");
 
   if(foldRow(root, 0, "g", true, "전역", globalCount(g), "b")){
     if(g.claude_md) fileRow(root, 1, g.claude_md);
@@ -622,10 +619,10 @@ function pluginNode(parent, pl){
 function selectProject(p){
   if(!guardEdit()) return;
   S.project = p;
-  renderTree();
+  renderSide();
   loadEff();
   renderInspector();
-  setTab("eff");
+  // ponytail: 사이드바 전환은 액티비티 바만 한다 — 프로젝트를 고른다고 트리를 감추지 않는다
 }
 
 /* ---------- 에디터 탭 줄 ---------- */
@@ -647,69 +644,37 @@ function closeTab(path){
   if(next){ openFile(next.path); return; }
   S.fseq++;    // 진행 중 파일 응답 무효
   S.file = null; S.fileErr = null; S.filePath = null; S.issues = null;
-  renderTree(); renderTabstrip(); renderInspector();
-  if(S.tab === "raw") renderRaw();
+  renderSide(); renderTabstrip(); renderInspector();
+  renderRaw();
 }
 function renderTabstrip(){
   var strip = clear(document.getElementById("tabstrip"));
   strip.setAttribute("role","tablist");
   var path = clear(document.getElementById("pathline"));
-  if(S.tab === "raw"){
-    if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
-    S.tabs.forEach(function(t){
-      var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
-      var b = el("button","tabname");
-      b.setAttribute("role","tab");
-      b.setAttribute("aria-selected", String(t.path === S.filePath));
-      if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
-      b.appendChild(el("span","tf", t.name));
-      if(t.sub) b.appendChild(el("span","ts", t.sub));
-      b.title = t.path;
-      b.onclick = function(){ openFile(t.path); };
-      d.appendChild(b);
-      var x = el("button","tabx","×");
-      x.setAttribute("aria-label", t.name + " 닫기");
-      x.onclick = function(){ closeTab(t.path); };
-      d.appendChild(x);
-      strip.appendChild(d);
-    });
-    path.textContent = S.filePath || "";
-    return;
-  }
-  var label = VIEW_TITLE[S.tab], sub = "";
-  if(S.tab === "eff"){
-    label = "규칙";
-    sub = S.project ? (S.project.name || S.project.path) : "프로젝트 미선택";
-    path.textContent = S.project ? S.project.path : "";
-  }else if(S.tab === "cards"){
-    sub = S.project ? (S.project.name || S.project.path) : "전역 + 플러그인";
-    path.textContent = "전역 + " + (S.project ? S.project.path : "(프로젝트 미선택)") + " + 플러그인";
-  }else{
-    path.textContent = S.scan ? S.scan.home || "" : "";
-  }
-  var d = el("div","tab act");
-  var b = el("button","tabname");
-  b.setAttribute("role","tab");
-  b.setAttribute("aria-selected","true");
-  b.setAttribute("aria-controls","panel");
-  b.appendChild(el("span","tf", label));
-  if(sub) b.appendChild(el("span","ts", sub));
-  b.onclick = function(){ renderPanel(); };
-  d.appendChild(b);
-  strip.appendChild(d);
+  if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
+  S.tabs.forEach(function(t){
+    var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
+    var b = el("button","tabname");
+    b.setAttribute("role","tab");
+    b.setAttribute("aria-selected", String(t.path === S.filePath));
+    if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
+    b.appendChild(el("span","tf", t.name));
+    if(t.sub) b.appendChild(el("span","ts", t.sub));
+    b.title = t.path;
+    b.onclick = function(){ openFile(t.path); };
+    d.appendChild(b);
+    var x = el("button","tabx","×");
+    x.setAttribute("aria-label", t.name + " 닫기");
+    x.onclick = function(){ closeTab(t.path); };
+    d.appendChild(x);
+    strip.appendChild(d);
+  });
+  path.textContent = S.filePath || "";
 }
 
-/* ---------- 패널 ---------- */
+/* ---------- 에디터 패널 — 언제나 열린 파일의 원문 ---------- */
 function panel(){ return clear(document.getElementById("panel")); }
-function renderPanel(){
-  if(S.tab === "raw") return renderRaw();
-  if(S.tab === "eff") return renderEff();
-  if(S.tab === "cards") return renderCards();
-  if(S.tab === "hooks") return renderHooks();
-  if(S.tab === "mcp") return renderMcp();
-}
 
-/* 1. 원문 */
 // 파일이 어떤 프로젝트 소속이면 그 프로젝트로 컨텍스트를 맞춘다 (전역·플러그인 파일이면 유지)
 function syncProject(path){
   var m = S.meta[path];
@@ -720,16 +685,17 @@ function syncProject(path){
   S.project = pr;
   loadEff();   // 트리·인스펙터 렌더는 openFile 이 이어서 수행
 }
-async function openFile(path, keepTab){
+async function openFile(path){
   if(!guardEdit()) return;
   syncProject(path);
   S.file = null; S.fileErr = null; S.filePath = path; S.issues = null;
+  S.selHook = null; S.selMcp = null;   // 파일을 열면 훅·MCP 선택 해제
   addTab(path);
-  renderTree();
-  if(!keepTab) setTab("raw"); else renderTabstrip();
-  // 파일은 자체 세대(fseq) + 스캔 세대(sseq)만 본다 — 뷰 전환이 진행 중인 파일 응답을 버리지 않게
+  renderSide();
+  renderTabstrip();
+  // 파일은 자체 세대(fseq) + 스캔 세대(sseq)만 본다
   var sseq = S.sseq, fseq = ++S.fseq;
-  if(S.tab === "raw") renderRaw();  // filePath 기준 "불러오는 중" 표시
+  renderRaw();  // filePath 기준 "불러오는 중" 표시
   renderInspector();
   var file = null, err = null;
   try{
@@ -739,7 +705,7 @@ async function openFile(path, keepTab){
   }
   if(S.dead || sseq !== S.sseq || fseq !== S.fseq) return;
   S.file = file; S.fileErr = err;
-  if(S.tab === "raw") renderRaw();
+  renderRaw();
   renderInspector();
 }
 function renderRaw(){
@@ -749,8 +715,8 @@ function renderRaw(){
   if(!S.file){
     var pd = p.appendChild(el("div","pad"));
     // 파일이 열리면 툴바가 역할을 설명하므로, 미선택일 때만 한 줄 설명
-    if(!S.filePath) pd.appendChild(viewHint(VIEW_HINT.raw));
-    pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
+    if(!S.filePath) pd.appendChild(viewHint("왼쪽 목록에서 항목을 선택하세요 · 액티비티 바로 파일/규칙/스킬/훅/MCP 전환"));
+    pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "열린 파일이 없습니다."));
     return;
   }
   p.appendChild(readBar());
@@ -972,47 +938,55 @@ async function loadEff(){
   if(!S.project || S.project.path !== proj) return;   // 프로젝트가 바뀐 응답은 버린다
   S.eff = items; S.effErr = err;
   renderInspector();
-  if(S.tab === "eff") renderEff();
+  if(S.side === "rules") renderSide();
 }
-function renderEff(){
-  var p = panel(), pad = el("div","pad");
-  p.appendChild(pad);
-  pad.appendChild(viewHint(S.project
-    ? "프로젝트 " + (S.project.name || S.project.path) + "에 실제로 적용되는 CLAUDE.md 체인 — 적용 순서대로"
-    : "프로젝트를 선택하면 적용 순서대로 표시"));
-  if(!S.project){ pad.appendChild(el("p","hint","탐색기에서 프로젝트 이름을 클릭하면 그 프로젝트에 적용되는 규칙이 순서대로 표시됩니다.")); return; }
-  if(S.project.exists === false){ pad.appendChild(el("p","hint","경로가 존재하지 않는 프로젝트입니다.")); return; }
+/* 사이드바 공통 행 — 본문 버튼 + (선택) 오른쪽 컨트롤. 중첩 button 금지라 래퍼는 div */
+function baseName(path){ var seg = String(path||"").split(/[\/]/); return seg[seg.length-1] || String(path||""); }
+function sideItem(parent, o){
+  var wrap = el("div","sitem"+(o.cls ? " "+o.cls : "")+(o.sel ? " sel" : ""));
+  var b = el("button","srow");
+  if(o.key) b.setAttribute("data-key", o.key);
+  if(o.title) b.title = o.title;
+  if(o.sel) b.setAttribute("aria-current","true");
+  var l1 = el("div","l1");
+  if(o.lead) l1.appendChild(o.lead);
+  l1.appendChild(el("span","t", o.text));
+  b.appendChild(l1);
+  if(o.badges && o.badges.length){
+    var l2 = el("div","l2");
+    o.badges.forEach(function(x){ if(x) l2.appendChild(x); });
+    b.appendChild(l2);
+  }
+  if(o.onclick) b.onclick = o.onclick;
+  wrap.appendChild(b);
+  if(o.ctrl) wrap.appendChild(o.ctrl);
+  parent.appendChild(wrap);
+  return wrap;
+}
+function sideMsg(parent, text, cls){ parent.appendChild(el("div","pad "+(cls || "hint"), text)); }
+
+/* 사이드바 2. 규칙 — 적용 순서대로. 본문은 에디터가 보여준다 */
+function renderRulesSide(root){
+  if(!S.project){ sideMsg(root, "파일 사이드바에서 프로젝트를 선택하세요."); return; }
+  if(S.project.exists === false){ sideMsg(root, "경로가 존재하지 않는 프로젝트입니다."); return; }
+  var pname = S.project.name || S.project.path;
+  sideCount(pname);
   if(S.effErr){
-    pad.appendChild(el("p","err","유효 규칙을 불러오지 못했습니다: "+S.effErr));
-    pad.appendChild(retryBtn(loadEff));
+    sideMsg(root, "유효 규칙을 불러오지 못했습니다: "+S.effErr, "err");
+    root.appendChild(el("div","pad")).appendChild(retryBtn(loadEff));
     return;
   }
-  if(!S.eff){ pad.appendChild(el("p","hint","불러오는 중…")); return; }
-  if(!S.eff.length){ pad.appendChild(el("p","hint","적용되는 규칙 파일이 없습니다.")); return; }
-  var seq = S.seq;
+  if(!S.eff){ sideMsg(root, "불러오는 중…"); return; }
+  if(!S.eff.length){ sideMsg(root, "적용되는 규칙 파일이 없습니다."); return; }
+  sideCount(S.eff.length + "개 · " + pname);
   S.eff.forEach(function(it, i){
-    var wrap = el("div","rule"+(it.lazy ? " lazy" : ""));
-    var h = el("div","rhd");
-    h.appendChild(el("span","rnum", String(i+1)));
-    h.appendChild(el("strong", null, SCOPE_KO[it.scope] || it.scope));
-    h.appendChild(badge(it.shared ? "팀 공유" : "개인", it.shared ? "shared" : null));
-    if(it.lazy) h.appendChild(badge("해당 폴더 작업 시 지연 로드","warn"));
-    h.appendChild(el("span","p", it.path));
-    wrap.appendChild(h);
-    var det = el("details"); det.open = true;
-    det.appendChild(el("summary", null, "본문"));
-    var pre = el("pre", null, "불러오는 중…");
-    det.appendChild(pre);
-    wrap.appendChild(det);
-    pad.appendChild(wrap);
-    getJSON("/api/file?path="+encodeURIComponent(it.path)).then(function(f){
-      if(stale(seq)) return;
-      pre.textContent = f.text || "";
-    }, function(e){
-      if(stale(seq)) return;
-      pre.textContent = "본문을 불러오지 못했습니다: "+e.message;
-      pre.className = "err";
-    });
+    var m = S.meta[it.path] || {};
+    sideItem(root, {text: m.label || baseName(it.path), key: it.path, title: it.path,
+      sel: S.filePath === it.path, lead: el("span","rnum", String(i+1)),
+      badges: [badge(SCOPE_KO[it.scope] || it.scope),
+               it.shared ? badge("팀 공유","shared") : null,
+               it.lazy ? badge("지연 로드","warn") : null],
+      onclick: function(){ openFile(it.path); }});
   });
 }
 
@@ -1068,19 +1042,21 @@ function cardMatch(c){
   return String(c.name||"").toLowerCase().indexOf(q) >= 0
       || String(c.desc||"").toLowerCase().indexOf(q) >= 0;
 }
+// 사이드바 상단 검색 + 종류 칩. 툴바는 다시 그리지 않는다 — 행 영역만 갱신해야 입력 포커스가 유지된다
 function cardBar(){
   var bar = el("div","tbar");
   var inp = el("input");
   inp.type = "search";
   inp.placeholder = "이름·설명 검색";
   inp.setAttribute("aria-label","스킬·에이전트·커맨드 이름·설명 검색");
+  inp.setAttribute("data-key","cardq");
   inp.value = S.cardq.q;
-  // 툴바는 다시 그리지 않는다 — 카드 영역만 갱신해야 입력 포커스가 유지된다
   inp.oninput = function(){ S.cardq.q = inp.value; renderCardBody(); };
   bar.appendChild(inp);
   ["skill","agent","command"].forEach(function(k){
     var b = el("button","chip", KIND_KO[k]);
     b.setAttribute("aria-pressed", String(!!S.cardq.kinds[k]));
+    b.setAttribute("data-key","chip:"+k);
     b.onclick = function(){
       S.cardq.kinds[k] = !S.cardq.kinds[k];
       b.setAttribute("aria-pressed", String(!!S.cardq.kinds[k]));
@@ -1088,28 +1064,9 @@ function cardBar(){
     };
     bar.appendChild(b);
   });
-  var tgt = el("select","tgt");
-  [["settings.local.json","settings.local.json (개인, 기본)"],
-   ["settings.json","settings.json (팀 공유)"]].forEach(function(o){
-    var op = el("option", null, o[1]);
-    op.value = o[0];
-    tgt.appendChild(op);
-  });
-  tgt.value = S.toggleTarget;
-  tgt.disabled = !toggleReady();
-  tgt.setAttribute("aria-label","토글 저장 대상 파일");
-  tgt.onchange = function(){ S.toggleTarget = tgt.value; renderToggleNotes(); };
-  bar.appendChild(el("span","hint","저장 대상"));
-  bar.appendChild(tgt);
-  if(!toggleReady())
-    bar.appendChild(el("span","hint", S.project ? "선택 프로젝트 경로 없음 — 토글 불가"
-                                                : "토글하려면 탐색기에서 프로젝트를 선택하세요"));
-  var cnt = el("span","hint");
-  cnt.id = "cardcount";
-  bar.appendChild(cnt);
   return bar;
 }
-// 툴바 아래 경고·오류 줄 — 카드 본문과 따로 갱신한다
+// 인스펙터 토글 섹션의 경고·오류 줄 — 토글 컨트롤과 따로 갱신한다
 function toggleNotes(){
   var box = el("div");
   box.id = "togglenotes";
@@ -1127,7 +1084,25 @@ function renderToggleNotes(box){
   else if(c < 0) box.appendChild(el("div","sharewarn","Claude Code 스킬 토글 미지원 버전 — 토글해도 적용되지 않을 수 있음"));
   if(S.toggleErr) box.appendChild(el("div","togglemsg", S.toggleErr));
 }
-// 컨트롤 변경 → POST /api/toggle → 200이면 재스캔, 실패면 오류 줄 + 컨트롤 원복
+// 인스펙터의 저장 대상 select
+function targetSelect(){
+  var wrap = el("div","ctl");
+  var tgt = el("select","tgt");
+  [["settings.local.json","settings.local.json (개인, 기본)"],
+   ["settings.json","settings.json (팀 공유)"]].forEach(function(o){
+    var op = el("option", null, o[1]);
+    op.value = o[0];
+    tgt.appendChild(op);
+  });
+  tgt.value = S.toggleTarget;
+  tgt.disabled = !toggleReady();
+  tgt.setAttribute("aria-label","토글 저장 대상 파일");
+  tgt.onchange = function(){ S.toggleTarget = tgt.value; renderToggleNotes(); };
+  wrap.appendChild(el("span","hint","저장 대상"));
+  wrap.appendChild(tgt);
+  return wrap;
+}
+// 컨트롤 변경 → POST /api/toggle → 200이면 제자리 반영, 실패면 오류 줄 + 컨트롤 원복
 async function doToggle(section, key, value, ctrls){
   if(!toggleReady()) return;
   S.toggleErr = null;
@@ -1142,10 +1117,10 @@ async function doToggle(section, key, value, ctrls){
   if(!err && res.status === 200){ applyToggle(res.body, section, key); return; }
   S.toggleErr = "토글하지 못했습니다: "
     + (err || ("HTTP " + res.status + " — " + ((res.body && res.body.error) || "요청 실패")));
-  renderCardBody();      // 컨트롤 원복 = 현재 스캔 값 기준 재렌더
-  renderToggleNotes();
+  renderSide();          // 컨트롤 원복 = 현재 스캔 값 기준 재렌더
+  renderInspector();
 }
-// 토글 성공 → 재스캔 없이 스캔 상태를 제자리에서 갱신하고 카드·트리·인스펙터만 다시 그린다.
+// 토글 성공 → 재스캔 없이 스캔 상태를 제자리에서 갱신하고 사이드바·인스펙터만 다시 그린다.
 // ponytail: 서버 응답(path/value/created)이 곧 디스크 상태. 전체 재스캔은 사용자가 재스캔 버튼을 누를 때만.
 function applyToggle(body, section, key){
   var p = S.project, sets = p.settings || (p.settings = {});
@@ -1159,31 +1134,32 @@ function applyToggle(body, section, key){
     delete sec[key];
     if(!keys(sec).length) delete entry.data[section];
   }else sec[key] = body.value;
-  if(body.created){ S.meta = scanIndex(S.scan); renderTree(); }
-  if(S.tab === "cards") renderCardBody();
-  renderToggleNotes();
+  if(body.created) S.meta = scanIndex(S.scan);
+  renderSide();
   renderInspector();
-}
-function renderCards(){
-  var p = panel();
-  p.appendChild(el("div","pad")).appendChild(viewHint(VIEW_HINT.cards));
-  if(!S.scan) return;
-  p.appendChild(cardBar());
-  p.appendChild(toggleNotes());
-  var body = el("div","pad");
-  body.id = "cardbody";
-  p.appendChild(body);
-  renderCardBody();
 }
 var LEVELS = [["on","on (제한 없음)"],["name-only","name-only (이름만)"],
               ["user-invocable-only","user-invocable-only (사용자 호출만)"],["off","off (사용 안 함)"]];
-// 스킬·커맨드 카드의 토글 줄. 카드 클릭(원문 열기)과 겹치지 않게 stopPropagation.
+// 사이드바 행 오른쪽 ON/OFF 스위치 (스킬·커맨드만)
+function skillSwitch(c){
+  var cur = skillOverrides()[c.key] || "on", on = cur !== "off";
+  var sw = el("button","switch", on ? "ON" : "OFF");
+  sw.setAttribute("role","switch");
+  sw.setAttribute("aria-checked", String(on));
+  sw.setAttribute("aria-label", c.name + " — 이 프로젝트에서 사용");
+  sw.setAttribute("data-key","sw:"+c.kind+":"+c.key);
+  sw.title = "이 프로젝트에서 사용";
+  sw.disabled = !toggleReady();
+  sw.onclick = function(){ doToggle("skillOverrides", c.key, on ? "off" : "on", [sw]); };
+  return sw;
+}
+// 인스펙터 토글 줄 — 스위치 + 4단계 select
 function skillCtrls(c){
   var row = el("div","ctl"), cur = skillOverrides()[c.key] || "on", on = cur !== "off";
   var sw = el("button","switch", on ? "ON" : "OFF");
   sw.setAttribute("role","switch");
   sw.setAttribute("aria-checked", String(on));
-  sw.setAttribute("aria-label", c.name + " — 이 프로젝트에서 사용");
+  sw.setAttribute("aria-label", c.name + " — 이 프로젝트에서 사용 (인스펙터)");
   sw.title = "이 프로젝트에서 사용";
   var sel = el("select","lvl");
   LEVELS.forEach(function(o){
@@ -1195,39 +1171,11 @@ function skillCtrls(c){
   sel.setAttribute("aria-label", c.name + " 사용 범위");
   var ctrls = [sw, sel], dis = !toggleReady();
   sw.disabled = dis; sel.disabled = dis;
-  sw.onclick = function(ev){ ev.stopPropagation(); doToggle("skillOverrides", c.key, on ? "off" : "on", ctrls); };
-  sel.onclick = function(ev){ ev.stopPropagation(); };
-  sel.onchange = function(ev){ ev.stopPropagation(); doToggle("skillOverrides", c.key, sel.value, ctrls); };
+  sw.onclick = function(){ doToggle("skillOverrides", c.key, on ? "off" : "on", ctrls); };
+  sel.onchange = function(){ doToggle("skillOverrides", c.key, sel.value, ctrls); };
   row.appendChild(sw);
   row.appendChild(sel);
-  var src = settingSource("skillOverrides", c.key);
-  if(src) row.appendChild(badge(src.label));
   return row;
-}
-function cardEl(c){
-  // ponytail: 출처는 섹션 헤더가 말해주므로 카드에서 뺐다
-  // 카드 안에 컨트롤 button/select 이 들어가므로 카드 자체는 div[role=button]
-  var card = el("div","card"+(c.off?" dim":""));
-  card.setAttribute("role","button");
-  card.tabIndex = 0;
-  var hd = el("div","chd");
-  hd.appendChild(el("h4", null, c.name));
-  hd.appendChild(badge(KIND_KO[c.kind] || c.kind, "k-"+c.kind));
-  if(c.off) hd.appendChild(badge(c.offLabel || "OFF","off"));
-  if(c.pluginOwned) hd.title = "플러그인 단위로만 설정";
-  card.appendChild(hd);
-  card.appendChild(el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음"));
-  // 에이전트는 skillOverrides 대상이 아니고, 플러그인 내부 항목은 플러그인 단위로만 켜고 끈다
-  if(c.kind !== "agent" && !c.pluginOwned) card.appendChild(skillCtrls(c));
-  card.title = c.path;
-  card.onclick = function(){ openFile(c.path); };
-  card.onkeydown = function(ev){
-    if(ev.target !== card) return;   // 컨트롤에서 올라온 키는 그대로 둔다
-    if(ev.key !== "Enter" && ev.key !== " ") return;
-    ev.preventDefault();
-    openFile(c.path);
-  };
-  return card;
 }
 // 플러그인 섹션 헤더의 ON/OFF — enabledPlugins 는 플러그인 단위
 function pluginSwitch(pl){
@@ -1236,6 +1184,7 @@ function pluginSwitch(pl){
   b.setAttribute("role","switch");
   b.setAttribute("aria-checked", String(on));
   b.setAttribute("aria-label", (pl.name || pl.key) + " — 이 프로젝트에서 플러그인 사용");
+  b.setAttribute("data-key","plsw:"+pl.key);
   b.title = "이 프로젝트에서 플러그인 사용";
   b.disabled = !toggleReady();
   b.onclick = function(){ doToggle("enabledPlugins", pl.key, on ? false : true, [b]); };
@@ -1245,14 +1194,21 @@ function pluginSwitch(pl){
   if(src) wrap.appendChild(badge(src.label));
   return wrap;
 }
+/* 사이드바 3. 스킬·에이전트·커맨드 */
+function renderSkillsSide(root){
+  if(!S.scan) return;
+  root.appendChild(cardBar());
+  var body = el("div");
+  body.id = "cardbody";
+  root.appendChild(body);
+  renderCardBody();
+}
 function renderCardBody(){
   var body = document.getElementById("cardbody");
   if(!body) return;
   clear(body);
   var all = collect(), shown = all.filter(cardMatch);
-  var cnt = document.getElementById("cardcount");
-  if(cnt) cnt.textContent = "표시 " + shown.length + " / 전체 " + all.length
-    + (S.project && S.project.exists === false ? " · 선택 프로젝트 경로 없음" : "");
+  sideCount("표시 " + shown.length + " / 전체 " + all.length);
   var pMap = Object.create(null);
   ((S.scan && S.scan.plugins) || []).forEach(function(pl){ pMap[pl.name || pl.key] = pl; });
   var order = [], by = Object.create(null);
@@ -1262,7 +1218,7 @@ function renderCardBody(){
     by[s.key].items.push(c);
   });
   order.sort(function(a,b){ return a.src.rank - b.src.rank || a.src.label.localeCompare(b.src.label); });
-  if(!order.length){ body.appendChild(el("p","hint","조건에 맞는 항목이 없습니다.")); return; }
+  if(!order.length){ sideMsg(body, "조건에 맞는 항목이 없습니다."); return; }
   var searching = !!S.cardq.q.trim();
   order.forEach(function(sec){
     var id = "cards:" + sec.src.key, dflt = sec.src.rank < 2;
@@ -1270,6 +1226,7 @@ function renderCardBody(){
     var open = searching || isOpen(id, dflt);
     var h = el("button","cardsec");
     h.setAttribute("aria-expanded", String(open));
+    h.setAttribute("data-key", id);
     h.appendChild(el("span","arw", open ? "▾" : "▸"));
     h.appendChild(el("span", null, sec.src.label + " (" + sec.items.length + ")"));
     var pl = sec.src.plugin ? pMap[sec.src.plugin] : null;
@@ -1280,9 +1237,15 @@ function renderCardBody(){
     if(pl && pl.exists !== false) hw.appendChild(pluginSwitch(pl));
     body.appendChild(hw);
     if(!open) return;
-    var grid = el("div","cards");
-    sec.items.forEach(function(c){ grid.appendChild(cardEl(c)); });
-    body.appendChild(grid);
+    sec.items.forEach(function(c){
+      // 에이전트는 skillOverrides 대상이 아니고, 플러그인 내부 항목은 플러그인 단위로만 켜고 끈다
+      var ctrl = (c.kind !== "agent" && !c.pluginOwned && toggleReady()) ? skillSwitch(c) : null;
+      sideItem(body, {text: c.name, key: c.path, title: c.path, sel: S.filePath === c.path,
+        cls: c.off ? "dim" : "", ctrl: ctrl,
+        badges: [badge(KIND_KO[c.kind] || c.kind, "k-"+c.kind),
+                 c.off ? badge(c.offLabel || "OFF","off") : null],
+        onclick: function(){ openFile(c.path); }});
+    });
   });
 }
 
@@ -1311,98 +1274,109 @@ function groupHooks(hooks){
   });
   return {order:order, byEvent:byEvent};
 }
-function renderHooks(){
-  var p = panel(), pad = el("div","pad");
-  p.appendChild(pad);
-  pad.appendChild(viewHint(VIEW_HINT.hooks));
+// 훅 출처가 settings 파일이면 그 파일 경로 — 플러그인 출처는 열 파일이 없다
+function hookFile(src){
+  src = String(src || "");
+  var g = (S.scan && S.scan.global) || {};
+  if(src.indexOf("global:") === 0){
+    var e = (g.settings || {})[src.slice(7)];
+    return (e && e.path) || null;
+  }
+  if(src.indexOf("project:") === 0){
+    var rest = src.slice(8), i = rest.lastIndexOf(":");
+    if(i <= 0) return null;
+    var path = rest.slice(0, i), name = rest.slice(i+1);
+    var pr = ((S.scan && S.scan.projects) || []).filter(function(x){ return x.path === path; })[0];
+    var pe = pr && (pr.settings || {})[name];
+    return (pe && pe.path) || null;
+  }
+  return null;
+}
+function hookKey(h){ return (h.event||"") + "|" + (h.matcher||"") + "|" + (h.source||""); }
+function selectHook(h){
+  var f = hookFile(h.source);
+  if(f) openFile(f);      // openFile 이 선택을 지우므로 바로 되살린다
+  S.selHook = h; S.selMcp = null;
+  renderSide();
+  renderInspector();
+}
+/* 사이드바 4. 훅 — 이벤트별 그룹 → 매처 행 */
+function renderHooksSide(root){
   var hooks = (S.scan && S.scan.hooks) || [];
-  if(!hooks.length){ pad.appendChild(el("p","hint","등록된 훅이 없습니다.")); return; }
-  var g = groupHooks(hooks);
+  sideCount(hooks.length + "개");
+  if(!hooks.length){ sideMsg(root, "등록된 훅이 없습니다."); return; }
+  var g = groupHooks(hooks), sel = S.selHook ? hookKey(S.selHook) : null;
   g.order.forEach(function(ev){
-    pad.appendChild(el("div","hookev", ev+" ("+g.byEvent[ev].length+")"));
+    root.appendChild(el("div","sechd", ev+" ("+g.byEvent[ev].length+")"));
     g.byEvent[ev].forEach(function(h){
-      var src = hookSource(h.source);
-      var row = el("div","hookrow "+src.cls);
-      var head = el("div");
-      head.appendChild(el("strong", null, "매처 "+(h.matcher || "(없음)")));
-      head.appendChild(document.createTextNode(" "));
-      head.appendChild(badge(src.label));
-      if(h.warn === "duplicate-star") head.appendChild(badge("* 매처와 중복 발화","warn"));
-      row.appendChild(head);
-      hookCmds(h).forEach(function(c){
-        row.appendChild(el("div","cmd", "→ "+c));
-      });
-      pad.appendChild(row);
+      var src = hookSource(h.source), n = hookCmds(h).length;
+      sideItem(root, {text: "매처 " + (h.matcher || "(없음)"), key: "hook:"+hookKey(h),
+        title: src.label + " → " + (hookCmds(h).join(" · ") || "(명령 없음)"),
+        cls: src.cls, sel: sel === hookKey(h),
+        badges: [badge("명령 "+n+"개"),
+                 h.warn === "duplicate-star" ? badge("⚠ * 매처와 중복 발화","warn") : null],
+        onclick: function(){ selectHook(h); }});
     });
   });
 }
 
-/* 5. MCP */
-function renderMcp(){
-  var p = panel(), pad = el("div","pad");
-  p.appendChild(pad);
-  pad.appendChild(viewHint(VIEW_HINT.mcp));
-  var mcp = (S.scan && S.scan.mcp) || [];
-  var order = [], bySrc = Object.create(null), ptitle = Object.create(null);
-  mcp.forEach(function(m){
+/* 사이드바 5. MCP — 출처별 그룹 → 서버 행 */
+// 출처 그룹: {key, label, file, items:[{name, config}]}
+function mcpGroups(){
+  var order = [], by = Object.create(null);
+  function grp(key, label, file){
+    if(!by[key]){ by[key] = {key:key, label:label, file:file || null, items:[]}; order.push(by[key]); }
+    return by[key];
+  }
+  ((S.scan && S.scan.mcp) || []).forEach(function(m){
     var s = m.source || "(출처 없음)";
-    if(!bySrc[s]){ bySrc[s] = []; order.push(s); }
-    bySrc[s].push(m);
+    var label = s === "global" ? "전역"
+      : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
+      : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s;
+    grp("src:"+s, label).items.push(m);
   });
-  // 플러그인 manifest 의 mcpServers — 있는 플러그인만 그룹 추가
   ((S.scan && S.scan.plugins) || []).forEach(function(pl){
     if(pl.exists === false) return;
-    var srv = pl.mcp_servers || {}, names = keys(srv);
-    if(!names.length) return;
-    var key = "plugin:"+pl.key;
-    if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
-    ptitle[key] = "플러그인 · " + (pl.name || pl.key);
-    names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
+    var srv = pl.mcp_servers || {};
+    keys(srv).forEach(function(n){
+      grp("plugin:"+pl.key, "플러그인 · "+(pl.name || pl.key)).items.push({name:n, config:srv[n]});
+    });
   });
   // 프로젝트 루트 .mcp.json — 선택 프로젝트가 있으면 그 프로젝트만
   var projs = (S.project && S.project.exists !== false) ? [S.project] : ((S.scan && S.scan.projects) || []);
   projs.forEach(function(pr){
     var mj = pr.mcp_json;
     if(!mj || !mj.data || typeof mj.data !== "object") return;
-    var srv = mj.data.mcpServers || {}, names = keys(srv);
-    if(!names.length) return;
-    var key = "pmcp:"+(mj.path || pr.path || "");
-    if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
-    names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
-  });
-  if(!order.length){ pad.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
-  order.forEach(function(s){
-    pad.appendChild(el("h3", null, ptitle[s] ? ptitle[s]
-      : s === "global" ? "전역"
-      : s.indexOf("pmcp:") === 0 ? "프로젝트 .mcp.json · "+s.slice(5)
-      : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
-      : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s));
-    var wrap = el("div","tblwrap"), tb = el("table");
-    var thead = el("thead"), tr = el("tr");
-    ["이름","command / url","기타 설정"].forEach(function(t){ tr.appendChild(el("th", null, t)); });
-    thead.appendChild(tr); tb.appendChild(thead);
-    var tbody = el("tbody");
-    bySrc[s].forEach(function(m){
-      var cfg = (m.config && typeof m.config === "object") ? m.config : {}, r = el("tr");
-      r.appendChild(el("td", null, m.name || ""));
-      r.appendChild(el("td", null, cfg.command || cfg.url || "-"));
-      var rest = {};
-      keys(cfg).forEach(function(k){ if(k !== "command" && k !== "url") rest[k] = cfg[k]; });
-      var td = el("td");
-      if(keys(rest).length){
-        var det = el("details");
-        det.appendChild(el("summary", null, "JSON"));
-        det.appendChild(el("pre", null, JSON.stringify(rest, null, 1)));
-        td.appendChild(det);
-      }else{
-        td.appendChild(el("span","hint","-"));
-      }
-      r.appendChild(td);
-      tbody.appendChild(r);
+    var srv = mj.data.mcpServers || {};
+    keys(srv).forEach(function(n){
+      grp("pmcp:"+(mj.path || pr.path || ""), "프로젝트 .mcp.json · "+(pr.name || pr.path), mj.path)
+        .items.push({name:n, config:srv[n]});
     });
-    tb.appendChild(tbody);
-    wrap.appendChild(tb);
-    pad.appendChild(wrap);
+  });
+  return order;
+}
+function selectMcp(m){
+  if(m.file) openFile(m.file);   // openFile 이 선택을 지우므로 바로 되살린다
+  S.selMcp = m; S.selHook = null;
+  renderSide();
+  renderInspector();
+}
+function renderMcpSide(root){
+  var groups = mcpGroups(), n = 0;
+  groups.forEach(function(g){ n += g.items.length; });
+  sideCount(n + "개");
+  if(!groups.length){ sideMsg(root, "등록된 MCP 서버가 없습니다."); return; }
+  groups.forEach(function(g){
+    root.appendChild(el("div","sechd", g.label + " (" + g.items.length + ")"));
+    g.items.forEach(function(it){
+      var cfg = (it.config && typeof it.config === "object") ? it.config : {};
+      var sel = {name:it.name, config:it.config, label:g.label, file:g.file};
+      sideItem(root, {text: it.name || "(이름 없음)", key: "mcp:"+g.key+":"+it.name,
+        title: g.label + " · " + (cfg.command || cfg.url || "-"),
+        sel: !!(S.selMcp && S.selMcp.name === it.name && S.selMcp.label === g.label),
+        badges: [badge(cfg.command ? "command" : (cfg.url ? "url" : "설정 없음"))],
+        onclick: function(){ selectMcp(sel); }});
+    });
   });
 }
 
@@ -1489,6 +1463,66 @@ function renderInspector(){
   }
   if(!any) ps.appendChild(el("div","hint","파일이나 프로젝트를 선택하면 속성이 표시됩니다."));
   else ps.appendChild(g2);
+  /* 항목 — 열린 파일이 스킬/에이전트/커맨드일 때 */
+  var item = S.filePath ? collect().filter(function(c){ return c.path === S.filePath; })[0] : null;
+  if(item){
+    var its = section(ins, "항목");
+    var g3 = el("div","kvgrid");
+    kvRow(g3, "이름", item.name);
+    kvRow(g3, "종류", KIND_KO[item.kind] || item.kind);
+    kvRow(g3, "출처", item.origin);
+    if(item.off) kvRow(g3, "상태", item.offLabel || "OFF", "warn");
+    its.appendChild(g3);
+    its.appendChild(el("div","desc"+(item.desc ? "" : " none"), item.desc || "설명 없음"));
+  }
+  /* 토글 — 저장 대상·경고는 항목 선택과 무관하게 항상 여기 */
+  var ts = section(ins, "토글");
+  if(item && item.kind === "agent")
+    ts.appendChild(el("div","hint","에이전트는 토글 대상이 아닙니다."));
+  else if(item && item.pluginOwned){
+    ts.appendChild(el("div","hint","플러그인 단위 스위치는 스킬 사이드바의 섹션 헤더에서 켜고 끕니다."));
+    var opl = ((S.scan && S.scan.plugins) || []).filter(function(x){
+      return ("플러그인:" + (x.name || x.key)) === item.origin; })[0];
+    if(opl && opl.exists !== false) ts.appendChild(pluginSwitch(opl));
+  }
+  else if(!toggleReady())
+    ts.appendChild(el("div","hint", S.project ? "선택 프로젝트 경로 없음 — 토글 불가"
+                                              : "토글하려면 파일 사이드바에서 프로젝트를 선택하세요"));
+  else if(item){
+    ts.appendChild(skillCtrls(item));
+    var isrc = settingSource("skillOverrides", item.key);
+    var sb = el("div","ctl");
+    sb.appendChild(el("span","hint","값 출처"));
+    sb.appendChild(badge(isrc ? isrc.label : "기본값"));
+    ts.appendChild(sb);
+  }
+  else ts.appendChild(el("div","hint","스킬·커맨드 파일을 열면 여기서 켜고 끕니다."));
+  ts.appendChild(targetSelect());
+  ts.appendChild(toggleNotes());
+  /* 선택한 훅 */
+  if(S.selHook){
+    var hsel = section(ins, "선택한 훅");
+    var g4 = el("div","kvgrid");
+    kvRow(g4, "이벤트", S.selHook.event || "-");
+    kvRow(g4, "매처", S.selHook.matcher || "(없음)");
+    kvRow(g4, "출처", hookSource(S.selHook.source).label);
+    if(S.selHook.warn === "duplicate-star") kvRow(g4, "경고", "* 매처와 중복 발화", "warn");
+    hsel.appendChild(g4);
+    var cl = el("div","hooklist"), cmds = hookCmds(S.selHook);
+    if(!cmds.length) cl.appendChild(el("div","hint","명령 없음"));
+    cmds.forEach(function(c){ cl.appendChild(el("div","cmd", "→ " + c)); });
+    hsel.appendChild(cl);
+    if(!hookFile(S.selHook.source)) hsel.appendChild(el("div","hint","출처 파일은 열 수 없습니다 (플러그인)"));
+  }
+  /* 선택한 MCP */
+  if(S.selMcp){
+    var ms = section(ins, "선택한 MCP");
+    var g5 = el("div","kvgrid");
+    kvRow(g5, "이름", S.selMcp.name || "-");
+    kvRow(g5, "출처", S.selMcp.label || "-");
+    ms.appendChild(g5);
+    ms.appendChild(el("pre","cfg", JSON.stringify(S.selMcp.config == null ? null : S.selMcp.config, null, 2)));
+  }
   /* 함께 적용됨 */
   var es = section(ins, "함께 적용됨");
   if(!S.project) es.appendChild(el("div","hint","프로젝트를 선택하세요."));
@@ -1565,10 +1599,10 @@ async function loadScan(){
   if(!guardEdit()) return;
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
-  var seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관 · 실패해도 되돌리지 않는다
+  var seq = ++S.sseq;   // 실패해도 되돌리지 않는다
   S.loading = true; S.msg = null; S.msgOk = false; S.scanErr = false;
   renderInspector();
-  clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
+  sideBody().appendChild(el("div","pad hint","스캔 중…"));
   panel().appendChild(el("div","pad hint","스캔 중…"));
   var scan = null, err = null;
   try{
@@ -1576,13 +1610,13 @@ async function loadScan(){
   }catch(e){ err = e.message; }
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
-  if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
+  if(err){  // 이전 스캔 데이터는 유지 — 사이드바도 그대로 두어 에디터와 어긋나지 않게
     S.msg = "스캔에 실패했습니다: "+err; S.msgOk = false; S.scanErr = true;
-    if(S.scan) renderTree();
+    if(S.scan) renderSide();
     // 세대(sseq)는 되돌리지 않는다 — 스캔 중 도착해 폐기된 응답은 지금 다시 요청해 복구
     // 복구 호출을 패널 렌더보다 먼저 — 복구가 패널을 다시 그려도 오류는 인스펙터에 남는다
     if(S.project && !S.eff && !S.effErr) loadEff();
-    if(S.filePath && !S.file && !S.fileErr) openFile(S.filePath, true);
+    if(S.filePath && !S.file && !S.fileErr) openFile(S.filePath);
     renderInspector();
     var q = panel(), qp = el("div","pad");
     q.appendChild(qp);
@@ -1592,10 +1626,9 @@ async function loadScan(){
   }
   S.scan = scan;
   S.meta = scanIndex(scan);
-  S.seq++;   // 이전 스캔 기준으로 날아간 패널 요청 무효화
   // 이전 선택 복원
   S.project = null; S.file = null; S.fileErr = null; S.filePath = null;
-  S.eff = null; S.effErr = null; S.eseq++;
+  S.eff = null; S.effErr = null; S.eseq++; S.selHook = null; S.selMcp = null;
   S.tabs = S.tabs.filter(function(t){ return !!S.meta[t.path]; });
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
@@ -1608,11 +1641,11 @@ async function loadScan(){
   }
   if(S.project) loadEff();
   renderActivity();
-  renderTree();
+  renderSide();
   renderTabstrip();
   renderInspector();
-  renderPanel();
-  if(prevFile) openFile(prevFile, true);
+  renderRaw();
+  if(prevFile) openFile(prevFile);
 }
 // 편집 중 Ctrl+S = 저장, 브라우저 닫기 = 경고
 document.addEventListener("keydown", function(ev){
@@ -1625,6 +1658,7 @@ window.addEventListener("beforeunload", function(ev){
   if(S.edit && S.edit.dirty){ ev.preventDefault(); ev.returnValue = ""; }
 });
 renderActivity();
+renderSide();
 renderTabstrip();
 renderInspector();
 loadScan();
