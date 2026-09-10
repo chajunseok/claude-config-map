@@ -5,95 +5,184 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claude 설정 지도</title>
 <style>
-:root{--bd:#d8dbe0;--bg:#fff;--muted:#666;--soft:#f6f7f9;--blue:#2c6fbb;--green:#2e8b57;--purple:#7a4fbf;--warn:#a86800;--err:#b3261e}
+/* 다크 기본 + prefers-color-scheme: light 오버라이드. 외부 리소스 0. */
+:root{
+  --bg:#191b1f; --bar:#13151a; --ed:#1e2126; --bd:#2b2f36;
+  --fg:#d7dae0; --muted:#7d8590; --val:#aeb4bd;
+  --acc:#8ab4f8; --sel:#2b3a55; --selfg:#ffffff;
+  --green:#7ee2a8; --warn:#e3b341; --err:#ff8f8a;
+  --hover:#23262c; --purple:#c29bf5;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Malgun Gothic",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#fafbfc; --bar:#f1f4f7; --ed:#ffffff; --bd:#dfe3e8;
+    --fg:#1c2430; --muted:#5c6773; --val:#454f5b;
+    --acc:#3b5bdb; --sel:#dbe7ff; --selfg:#1c2430;
+    --green:#1f6b3f; --warn:#a86800; --err:#b3261e;
+    --hover:#eaeef3; --purple:#6a3fb0;
+  }
+}
 *{box-sizing:border-box}
-body{margin:0;font:13px/1.5 -apple-system,"Segoe UI",system-ui,sans-serif;color:#1b1d21;background:var(--bg)}
-button{font:inherit;color:inherit}
-#topbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--bd);background:var(--soft)}
-#topbar .title{font-size:14px}
-#topbar .meta{color:var(--muted)}
-#topbar .spacer{flex:1}
-.btn{border:1px solid var(--bd);background:#fff;border-radius:4px;padding:4px 10px;cursor:pointer}
-.btn:hover{background:#eef1f5}
-.badge{display:inline-block;border:1px solid var(--bd);border-radius:10px;padding:0 7px;font-size:11px;color:var(--muted);background:#fff;white-space:nowrap}
-.badge.warn{color:var(--warn);border-color:#e0c07a;background:#fff8e8}
-.badge.err{color:var(--err);border-color:#e6b4b0;background:#fdeceb;cursor:pointer}
-.badge.shared{color:var(--green);border-color:#a9d5bd;background:#eef8f2}
-.badge.personal{color:var(--muted)}
-.badge.off{color:var(--err);border-color:#e6b4b0;background:#fdeceb}
-#errbox{border-bottom:1px solid var(--bd);background:#fdeceb;padding:8px 12px}
-#errbox ul{margin:0;padding-left:18px}
-main{display:flex;align-items:stretch;height:calc(100vh - 41px)}
-#tree{width:320px;min-width:320px;overflow:auto;border-right:1px solid var(--bd);padding:8px}
-#right{flex:1;min-width:0;overflow:auto;padding:10px 14px}
-@media (max-width:900px){main{display:block;height:auto}#tree{width:auto;min-width:0;border-right:0;border-bottom:1px solid var(--bd);max-height:50vh}}
-details.grp>summary{font-weight:600;padding:4px 2px;cursor:pointer}
-details.sub>summary,details.proj>summary,details.plug>summary{padding:3px 2px;cursor:pointer}
-details.sub,details.plug,.proj{margin-left:10px}
-.prow{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:1px 0}
-.ptoggle{border:0;background:none;cursor:pointer;color:var(--muted);padding:0 2px;font-size:10px}
-.ptoggle[disabled]{visibility:hidden}
-.file{display:flex;align-items:center;gap:6px;text-align:left;border:0;background:none;padding:2px 4px;margin-left:10px;border-radius:3px;cursor:pointer}
-.file:hover,.file:focus{background:#eef1f5}
-.file .fname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.file .fmeta{color:var(--muted);font-size:11px;white-space:nowrap}
-.file.indent{margin-left:26px}
-.pname{border:0;background:none;padding:1px 4px;border-radius:3px;cursor:pointer;font-weight:600}
-.pname:hover{background:#eef1f5}
+html,body{height:100%}
+body{margin:0;font:13px/1.5 var(--sans);color:var(--fg);background:var(--bg)}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+#app{display:grid;grid-template-columns:48px 260px 1fr 260px;height:100vh;overflow:hidden}
+
+/* ---- 액티비티 바 ---- */
+#activity{background:var(--bar);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;overflow:hidden}
+#logo{width:24px;height:24px;border-radius:6px;background:var(--acc);flex:none;margin-bottom:8px}
+#views{display:flex;flex-direction:column;gap:4px}
+#views button{width:32px;height:32px;border-radius:5px;font-size:10px;color:var(--muted);display:flex;align-items:center;justify-content:center;line-height:1}
+#views button:hover{background:var(--hover);color:var(--fg)}
+#views button[aria-selected=true]{background:var(--bd);color:var(--fg);font-weight:700}
+
+/* ---- 탐색기 ---- */
+#explorer{border-right:1px solid var(--bd);min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.pane-hd{display:flex;justify-content:space-between;gap:8px;padding:8px 10px;font-size:11px;color:var(--muted);letter-spacing:.06em;border-bottom:1px solid var(--bd);flex:none}
+#tree{overflow:auto;flex:1;padding:4px 0;font-size:12.5px}
+.row{display:flex;align-items:center;height:24px;border-left:2px solid transparent}
+.row.d1,.row.d2,.row.d3{border-left-color:var(--bd)}
+.row:hover{background:var(--hover)}
+.row.sel{background:var(--sel)}
+.row.sel .nm,.row.sel .num{color:var(--selfg)}
+.arw{width:12px;flex:none;font-size:9px;color:var(--muted);text-align:left;padding:0;height:24px;line-height:24px}
+.mn{flex:1;min-width:0;display:flex;align-items:center;gap:6px;height:24px;padding:0 8px 0 0;text-align:left}
+.nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{font:11px/1 var(--mono);color:var(--muted);flex:none}
+.b{font-weight:600}
+.warn{color:var(--warn)}
+.off{color:var(--muted)}
 .gone{text-decoration:line-through;color:var(--muted)}
-.sel{outline:2px solid var(--blue)}
-[role=tablist]{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--bd);margin-bottom:10px}
-[role=tab]{border:1px solid var(--bd);border-bottom:0;background:var(--soft);padding:5px 12px;border-radius:4px 4px 0 0;cursor:pointer;margin-bottom:-1px}
-[role=tab][aria-selected=true]{background:#fff;font-weight:600}
-pre{background:var(--soft);border:1px solid var(--bd);border-radius:4px;padding:10px;overflow:auto;white-space:pre-wrap;word-break:break-word;max-height:70vh}
+
+/* ---- 에디터 ---- */
+#editor{background:var(--ed);min-width:0;display:flex;flex-direction:column;overflow:hidden}
+#tabstrip{display:flex;flex:none;background:var(--bg);border-bottom:1px solid var(--bd);overflow-x:auto;font-size:12px}
+.tab{display:flex;align-items:center;flex:none;max-width:220px;border-top:2px solid transparent;border-right:1px solid var(--bd);color:var(--muted)}
+.tab.act{background:var(--ed);border-top-color:var(--acc);color:var(--fg)}
+.tab .tabname{display:flex;align-items:baseline;gap:6px;min-width:0;padding:5px 4px 5px 10px}
+.tab .tf{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .ts{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .tabx{padding:5px 8px;color:var(--muted);line-height:1}
+.tab .tabx:hover{color:var(--fg);background:var(--hover)}
+.tab.empty{padding:5px 10px;color:var(--muted);border-right:0}
+#pathline{flex:none;font:11px/1.6 var(--mono);color:var(--muted);padding:4px 12px;border-bottom:1px solid var(--bd);word-break:break-all}
+#panel{flex:1;overflow:auto;min-width:0}
+.code{font:12px/1.7 var(--mono);padding:8px 0}
+.line{display:grid;grid-template-columns:40px 1fr}
+.line .ln{text-align:right;padding-right:8px;color:var(--muted);user-select:none;white-space:pre}
+.line .src{min-width:0;padding-left:10px;color:var(--fg);white-space:pre-wrap;word-break:break-all}
+.code pre.rest{margin:0;padding-left:50px;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
+.pad{padding:12px 14px}
 .hint{color:var(--muted)}
 .err{color:var(--err)}
-.srchdr{margin:14px 0 4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.srchdr .p{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--muted);word-break:break-all}
-.lazy pre{background:#ececec}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px;align-items:start}
-.card{border:1px solid var(--bd);border-radius:5px;padding:8px}
-.card.dim{background:#f0f0f0;color:var(--muted)}
+.p{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
+.badge{display:inline-block;border:1px solid var(--bd);border-radius:10px;padding:0 7px;font-size:11px;color:var(--muted);white-space:nowrap}
+.badge.warn{color:var(--warn);border-color:var(--warn)}
+.badge.shared{color:var(--green);border-color:var(--green)}
+.badge.off{color:var(--err);border-color:var(--err)}
+/* 규칙 뷰 */
+.rule{border:1px solid var(--bd);border-radius:6px;margin-bottom:10px;overflow:hidden}
+.rule.lazy{border-color:var(--warn)}
+.rule>.rhd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;background:var(--bg)}
+.rnum{width:20px;height:20px;flex:none;border-radius:50%;border:1px solid var(--acc);color:var(--acc);font:11px/18px var(--mono);text-align:center}
+.rule details{border-top:1px solid var(--bd)}
+.rule summary{padding:5px 10px;color:var(--muted);font-size:12px;cursor:pointer}
+.rule pre{margin:0;padding:10px;font:12px/1.7 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;color:var(--fg)}
+/* 스킬 뷰 */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-items:start}
+.card{border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0}
+/* OFF 카드: 텍스트 대비는 유지하고 배경/경계선만 흐리게 */
+.card.dim{border-style:dashed;border-color:var(--muted)}
 .card h4{margin:0 0 4px;font-size:13px;word-break:break-all}
 .card .kv{color:var(--muted);font-size:11px;margin-bottom:4px}
-.card .desc{font-size:12px;max-height:9em;overflow:auto}
-.card .desc.none{color:#666}
-.hookev{margin:12px 0 4px;font-weight:600}
-.hookrow{border-left:4px solid var(--bd);padding:4px 8px;margin:4px 0;background:var(--soft);border-radius:0 4px 4px 0}
-.hookrow.global{border-left-color:var(--blue)}
+.card .desc{font-size:12px;max-height:9em;overflow:auto;color:var(--val)}
+.card .desc.none{color:var(--muted)}
+/* 훅 뷰 */
+.hookev{margin:14px 0 6px;font-weight:600}
+.hookrow{border-left:3px solid var(--bd);padding:5px 10px;margin:5px 0;background:var(--bg);border-radius:0 4px 4px 0}
+.hookrow.global{border-left-color:var(--acc)}
 .hookrow.project{border-left-color:var(--green)}
 .hookrow.plugin{border-left-color:var(--purple)}
-.hookrow .cmd{font-family:ui-monospace,Consolas,monospace;font-size:11px;word-break:break-all;margin-left:12px}
-table{border-collapse:collapse;width:100%;margin-bottom:12px}
-th,td{border:1px solid var(--bd);padding:4px 6px;text-align:left;vertical-align:top;word-break:break-all}
-th{background:var(--soft)}
+.hookrow .cmd{font-family:var(--mono);font-size:11px;word-break:break-all;margin-left:12px;color:var(--val)}
+/* MCP 뷰 */
+.tblwrap{overflow-x:auto;margin-bottom:14px}
+table{border-collapse:collapse;width:100%}
+th,td{border:1px solid var(--bd);padding:4px 6px;text-align:left;vertical-align:top;word-break:break-all;font-size:12px}
+th{background:var(--bg);color:var(--muted);font-weight:600}
+td pre{margin:0;font:11px/1.5 var(--mono);white-space:pre-wrap;word-break:break-all}
+h3{font-size:13px;margin:14px 0 6px}
+
+/* ---- 인스펙터 ---- */
+#inspector{border-left:1px solid var(--bd);padding:14px 16px;font-size:12px;display:flex;flex-direction:column;gap:18px;overflow:auto;min-width:0}
+.sec-t{font-size:11px;color:var(--muted);letter-spacing:.06em;margin-bottom:8px}
+.kvgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 12px}
+.kvgrid .k{color:var(--muted)}
+.kvgrid .v{color:var(--val);word-break:break-all}
+.kvgrid .v.shared{color:var(--green)}
+.kvgrid .v.warn{color:var(--warn)}
+.efflist,.hooklist{display:flex;flex-direction:column;gap:5px}
+.effitem{display:flex;gap:6px;align-items:baseline;color:var(--val);word-break:break-all}
+.effitem .n{color:var(--acc);font:11px/1.5 var(--mono);flex:none}
+.effitem.cur{color:var(--fg)}
+.effitem.lazyit{color:var(--warn)}
+.hookitem{color:var(--val);word-break:break-all}
+.spacer{flex:1;min-height:4px}
+.acts{display:flex;gap:8px}
+.acts button{flex:1;border:1px solid var(--bd);border-radius:4px;padding:5px;text-align:center;color:var(--fg)}
+.acts button:hover{background:var(--hover)}
+.acts button[disabled]{color:var(--muted);cursor:default}
+.linkbtn{color:var(--err);text-decoration:underline;padding:0}
+#errlist{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+#errlist div{color:var(--err);word-break:break-all;font-size:11px}
+
+@media (max-width:900px){
+  #app{grid-template-columns:48px 200px 1fr;grid-template-rows:1fr auto}
+  #activity{grid-row:1/3}
+  #explorer{grid-row:1/3}
+  #editor{grid-column:3;grid-row:1}
+  #inspector{grid-column:3;grid-row:2;border-left:0;border-top:1px solid var(--bd);max-height:42vh}
+}
 </style>
 </head>
 <body>
-<header id="topbar"></header>
-<div id="errbox" hidden></div>
-<main>
-  <nav id="tree" aria-label="설정 트리"></nav>
-  <section id="right">
-    <div role="tablist" aria-label="상세 보기"></div>
+<div id="app">
+  <nav id="activity" aria-label="뷰 전환">
+    <div id="logo" aria-hidden="true"></div>
+    <div id="views" role="tablist" aria-label="상세 보기"></div>
+  </nav>
+  <nav id="explorer" aria-label="설정 트리">
+    <div class="pane-hd"><span>탐색기</span><span id="exp-count"></span></div>
+    <div id="tree"></div>
+  </nav>
+  <section id="editor">
+    <div id="tabstrip"></div>
+    <div id="pathline"></div>
     <div id="panel" role="tabpanel"></div>
   </section>
-</main>
+  <aside id="inspector" aria-label="인스펙터"></aside>
+</div>
 <script>
 "use strict";
 // ponytail: 상태는 scan 응답 하나. 라우터·프레임워크 없음.
 var MIN_VER = [2,1,199];
-var TABS = [
-  ["raw","원문"],["eff","유효 규칙"],["cards","스킬·에이전트·커맨드"],["hooks","훅 흐름"],["mcp","MCP"]
-];
+var VIEWS = [["raw","파일"],["eff","규칙"],["cards","스킬"],["hooks","훅"],["mcp","MCP"]];
+var VIEW_TITLE = {raw:"파일", eff:"규칙", cards:"스킬·에이전트·커맨드", hooks:"훅 흐름", mcp:"MCP"};
 var SCOPE_KO = {global:"전역",
   "global-rules":"전역 rules", project:"프로젝트", "project-local":"프로젝트 로컬",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
-// seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관). dead: 서버 종료 후 렌더 중단
+var MAX_TABS = 6;
+var MAX_LINE_ROWS = 2000;
+// seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관), fseq: 파일 세대, eseq: 유효 규칙 세대
+// dead: 서버 종료 후 렌더 중단
 var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null,
-         seq:0, fseq:0, sseq:0, loading:false, dead:false};
+         seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
+         tabs:[], meta:Object.create(null), expanded:Object.create(null),
+         eff:null, effErr:null, errOpen:false};
 function stale(seq){ return S.dead || seq !== S.seq; }
+function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
 
@@ -106,6 +195,8 @@ function ymd(mtime){
   var d=new Date(mtime*1000), p=function(x){return (x<10?"0":"")+x;};
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
 }
+function len(a){ return (a||[]).length; }
+function keys(o){ return Object.keys(o||{}); }
 // 파싱 실패면 null (버전 미확인)
 function cmpVer(str){
   var m=/(\d+)\.(\d+)\.(\d+)/.exec(str||"");
@@ -121,203 +212,32 @@ async function getJSON(url){
   return b;
 }
 
-/* ---------- 상단 바 ---------- */
-function renderTop(){
-  var t = clear(document.getElementById("topbar"));
-  t.appendChild(el("strong","title","Claude 설정 지도"));
-  if(S.scan){
-    t.appendChild(el("span","meta","스캔 "+new Date(S.scan.scanned_at).toLocaleString("ko-KR")));
-    var v = S.scan.claude_version, c = cmpVer(v);
-    t.appendChild(el("span","meta","Claude Code "+(c === null ? "미확인" : v)));
-    if(c === null) t.appendChild(badge("버전 미확인","warn"));
-    else if(c < 0) t.appendChild(badge("스킬 토글 미지원 버전","warn"));
-    var errs = S.scan.errors || [];
-    if(errs.length){
-      var eb = el("button","badge err","오류 "+errs.length+"건");
-      eb.setAttribute("aria-expanded","false");
-      eb.onclick = function(){
-        var box=document.getElementById("errbox"), open=box.hidden;
-        box.hidden = !open; eb.setAttribute("aria-expanded", String(open));
-      };
-      t.appendChild(eb);
-    }
-  }
-  if(S.msg) t.appendChild(el("span","err", S.msg));
-  t.appendChild(el("span","spacer"));
-  var re = el("button","btn", S.loading ? "스캔 중…" : "재스캔");
-  re.disabled = S.loading; re.onclick = loadScan; t.appendChild(re);
-  var sd = el("button","btn","종료"); sd.onclick = shutdown; t.appendChild(sd);
-}
-function renderErrors(){
-  var box = clear(document.getElementById("errbox"));
-  box.hidden = true;
-  var errs = (S.scan && S.scan.errors) || [];
-  if(!errs.length) return;
-  var ul = el("ul");
-  errs.forEach(function(e){
-    var li = el("li");
-    li.appendChild(el("code",null,e.path||""));
-    li.appendChild(document.createTextNode(" — "+(e.error||"")));
-    ul.appendChild(li);
-  });
-  box.appendChild(ul);
-}
-async function shutdown(){
-  if(S.dead) return;
-  var fail = null;
-  try{
-    var r = await fetch("/api/shutdown",{method:"POST"}), b = null;
-    try{ b = await r.json(); }catch(e){}
-    if(!r.ok || !b || b.ok !== true) fail = (b && b.error) || ("HTTP "+r.status);
-  }catch(e){ fail = e.message; }
-  if(fail){  // 실패면 UI 유지, 상단 바에만 표시
-    S.msg = "종료하지 못했습니다: "+fail;
-    renderTop();
-    return;
-  }
-  S.dead = true;
-  document.body.textContent = "";
-  var p = el("p",null,"서버가 종료되었습니다");
-  p.style.padding = "24px";
-  document.body.appendChild(p);
-}
-
-/* ---------- 좌측 트리 ---------- */
-function grp(title){var d=el("details","grp"); d.open=true; d.appendChild(el("summary",null,title)); return d;}
-function sub(title, n){var d=el("details","sub"); d.appendChild(el("summary",null,title+" ("+n+")")); return d;}
-function fileRow(f, extras, indent){
-  var b = el("button","file"+(indent?" indent":""));
-  b.title = f.path || "";
-  b.appendChild(el("span","fname", f.name || f.path || "(이름 없음)"));
-  b.appendChild(el("span","fmeta", kb(f.size)+" · "+ymd(f.mtime)));
-  b.appendChild(badge(f.shared ? "팀 공유" : "개인", f.shared ? "shared" : "personal"));
-  (extras||[]).forEach(function(x){ b.appendChild(x); });
-  b.onclick = function(){ openFile(f.path); };
-  return b;
-}
-function addList(parent, title, arr){
-  arr = arr || [];
-  if(!arr.length) return;
-  var d = sub(title, arr.length);
-  arr.forEach(function(f){ d.appendChild(fileRow(f)); });
-  parent.appendChild(d);
-}
-function settingsList(parent, obj){
-  var keys = Object.keys(obj||{});
-  if(!keys.length) return;
-  var d = sub("settings", keys.length);
-  keys.forEach(function(k){
-    var v = obj[k];
-    d.appendChild(fileRow({path:v.path, name:k, size:v.size, mtime:v.mtime, shared:v.shared}));
-  });
-  parent.appendChild(d);
-}
-function renderTree(){
-  var root = clear(document.getElementById("tree"));
-  if(!S.scan) return;
-  var g = S.scan.global || {};
-  var gd = grp("전역");
-  if(g.claude_md) gd.appendChild(fileRow(g.claude_md));
-  else gd.appendChild(el("div","hint file","CLAUDE.md 없음"));
-  addList(gd, "rules", g.rules);
-  settingsList(gd, g.settings);
-  addList(gd, "skills", g.skills);
-  addList(gd, "agents", g.agents);
-  addList(gd, "commands", g.commands);
-  root.appendChild(gd);
-
-  var projects = S.scan.projects || [];
-  var pd = grp("프로젝트 ("+projects.length+"개)");
-  projects.forEach(function(p){ pd.appendChild(projectNode(p)); });
-  root.appendChild(pd);
-
-  var plugins = S.scan.plugins || [];
-  var ld = grp("플러그인 ("+plugins.length+"개)");
-  plugins.forEach(function(pl){ ld.appendChild(pluginNode(pl)); });
-  root.appendChild(ld);
-}
-// details/summary 대신 버튼 2개 — <summary> 안의 인터랙티브 요소는 a11y 이슈
-function projectNode(p){
-  var wrap = el("div","proj");
-  var head = el("div","prow");
-  var kids = el("div","pkids");
-  kids.hidden = true;
-  var tg = el("button","ptoggle","▶");
-  tg.setAttribute("aria-expanded","false");
-  tg.setAttribute("aria-label", (p.name||p.path)+" 하위 항목 펼치기");
-  tg.onclick = function(){
-    kids.hidden = !kids.hidden;
-    tg.textContent = kids.hidden ? "▶" : "▼";
-    tg.setAttribute("aria-expanded", String(!kids.hidden));
-  };
-  head.appendChild(tg);
-  var nb = el("button","pname"+(p.exists===false?" gone":""), p.name || p.path);
-  nb.title = p.path;
-  if(S.project && S.project.path === p.path){ nb.classList.add("sel"); nb.setAttribute("aria-current","true"); }
-  nb.onclick = function(){ selectProject(p); };
-  head.appendChild(nb);
-  if(p.exists === false) head.appendChild(badge("없음"));
-  if(p.coverage === "root-only") head.appendChild(badge("루트만 · "+(COVER_KO[p.coverage_reason]||p.coverage_reason||"사유 미상"),"warn"));
-  if(p.truncated || p.incomplete) head.appendChild(badge("일부만 스캔","warn"));
-  wrap.appendChild(head);
-  if(p.exists === false){ tg.disabled = true; return wrap; }
-
-  (p.claude_md||[]).forEach(function(f){
-    var lazy = f.scope === "subdir";
-    kids.appendChild(fileRow(f, lazy ? [badge("지연","warn")] : null, lazy));
-  });
-  addList(kids, "rules", p.rules);
-  settingsList(kids, p.settings);
-  addList(kids, "skills", p.skills);
-  addList(kids, "agents", p.agents);
-  addList(kids, "commands", p.commands);
-  wrap.appendChild(kids);
-  return wrap;
-}
-function pluginNode(pl){
-  var d = el("details","plug");
-  var s = el("summary");
-  s.appendChild(el("span", pl.exists === false ? "gone" : null, (pl.name||pl.key)+"@"+(pl.version||"?")));
-  if(pl.exists === false) s.appendChild(badge("없음"));
-  if(pluginOff(pl)) s.appendChild(badge("OFF","off"));
-  d.appendChild(s);
-  if(pl.exists === false) return d;
-  if(pl.manifest && pl.manifest.path)
-    d.appendChild(fileRow({path:pl.manifest.path, name:"plugin.json", size:pl.manifest.size, mtime:pl.manifest.mtime, shared:pl.manifest.shared}));
-  addList(d, "skills", pl.skills);
-  addList(d, "commands", pl.commands);
-  return d;
-}
-function selectProject(p){
-  S.project = p;
-  renderTree();
-  setTab("eff");
-}
-
 /* ---------- 설정 조회 헬퍼 ---------- */
 function settingsData(obj){
   var out = {};
-  Object.keys(obj||{}).forEach(function(k){
+  keys(obj).forEach(function(k){
     var d = obj[k] && obj[k].data;
     if(d && typeof d === "object") out[k] = d;
   });
   return out;
 }
 // 전역 settings.json → 전역 local → 프로젝트 settings.json → 프로젝트 local 순 병합 (뒤가 우선)
-function mergedSetting(key){
+// proj 미지정이면 선택 프로젝트(S.project) 기준
+function mergedSetting(key, proj){
   var res = Object.create(null), sets = [];
+  var pr = (proj === undefined) ? S.project : proj;
   if(S.scan && S.scan.global) sets.push(S.scan.global.settings);
-  if(S.project && S.project.exists !== false) sets.push(S.project.settings);
+  if(pr && pr.exists !== false) sets.push(pr.settings);
   sets.forEach(function(obj){
     var all = settingsData(obj);
     ["settings.json","settings.local.json"].forEach(function(k){
       var v = all[k] && all[k][key];
-      if(v && typeof v === "object") Object.keys(v).forEach(function(n){ res[n] = v[n]; });
+      if(v && typeof v === "object") keys(v).forEach(function(n){ res[n] = v[n]; });
     });
   });
   return res;
 }
-function skillOverrides(){ return mergedSetting("skillOverrides"); }
+function skillOverrides(proj){ return mergedSetting("skillOverrides", proj); }
 function enabledPlugins(){ return mergedSetting("enabledPlugins"); }
 // skillOverrides 키: 스킬은 SKILL.md면 부모 디렉터리명, 아니면 파일명(확장자 제외).
 // 커맨드는 파일명에서 확장자(.md/.toml 등) 제거. 에이전트는 오버라이드 대상 아님.
@@ -331,26 +251,343 @@ function overrideKey(f, kind){
 }
 function pluginOff(pl){ return enabledPlugins()[pl.key] === false; }
 
-/* ---------- 탭 ---------- */
-function renderTabs(){
-  var bar = clear(document.querySelector("[role=tablist]"));
-  TABS.forEach(function(t){
-    var b = el("button", null, t[1]);
+/* ---------- 스캔 인덱스 (경로 → 표시용 메타) ---------- */
+// 재스캔 후 선택 복원 + 인스펙터 속성 표시. API 계약의 "직전 스캔에 등장한 경로"와 동일 범위.
+// 프로젝트 경로 기준 상대경로 (구분자 /), 접두어가 아니면 null
+function relLabel(path, base){
+  var p = String(path||"").replace(/\\/g,"/");
+  var b = String(base||"").replace(/\\/g,"/").replace(/\/+$/,"");
+  if(!b) return null;
+  return p.toLowerCase().indexOf(b.toLowerCase()+"/") === 0 ? p.slice(b.length+1) : null;
+}
+// 홈 디렉터리 프로젝트는 ~/.claude 항목을 전역과 같은 경로로 다시 싣는다 — 전역 쪽만 렌더
+var GPATHS = Object.create(null);
+function dedupProj(p){
+  if(p.coverage_reason !== "home") return p;
+  var dup = function(f){ return !!(f && f.path && GPATHS[f.path]); };
+  var q = {};
+  keys(p).forEach(function(k){ q[k] = p[k]; });
+  ["claude_md","rules","skills","agents","commands"].forEach(function(k){
+    if(Array.isArray(p[k])) q[k] = p[k].filter(function(f){ return !dup(f); });
+  });
+  var st = Object.create(null);
+  keys(p.settings).forEach(function(k){ if(!dup(p.settings[k])) st[k] = p.settings[k]; });
+  q.settings = st;
+  return q;
+}
+function scanIndex(sc){
+  var set = Object.create(null);
+  GPATHS = Object.create(null);
+  function add(f, m){
+    if(!f || !f.path || set[f.path]) return;
+    var lazy = f.scope === "subdir";
+    set[f.path] = {scope:m.scope, origin:m.origin, project:m.project || null, shared:!!f.shared,
+                   lazy:lazy, label: lazy ? relLabel(f.path, m.project) : null};
+  }
+  function addAll(a, m){ (a||[]).forEach(function(f){ add(f, m); }); }
+  function addSettings(o, m){ keys(o).forEach(function(k){ add(o[k], m); }); }
+  function addKinds(o, origin, prefix, proj){
+    addAll(o.skills, {scope:prefix+" skills", origin:origin, project:proj});
+    addAll(o.agents, {scope:prefix+" agents", origin:origin, project:proj});
+    addAll(o.commands, {scope:prefix+" commands", origin:origin, project:proj});
+  }
+  var g = sc.global || {};
+  [g.claude_md].concat(g.rules||[], g.skills||[], g.agents||[], g.commands||[],
+    keys(g.settings).map(function(k){ return g.settings[k]; }))
+    .forEach(function(f){ if(f && f.path) GPATHS[f.path] = true; });
+  add(g.claude_md, {scope:"전역", origin:"전역"});
+  addAll(g.rules, {scope:"전역 rules", origin:"전역"});
+  addSettings(g.settings, {scope:"전역 settings", origin:"전역"});
+  addKinds(g, "전역", "전역");
+  (sc.projects||[]).forEach(function(p){
+    var o = p.name || p.path;
+    (p.claude_md||[]).forEach(function(f){
+      add(f, {scope: f.scope === "subdir" ? "하위 폴더" : "프로젝트", origin:o, project:p.path});
+    });
+    addAll(p.rules, {scope:"프로젝트 rules", origin:o, project:p.path});
+    addSettings(p.settings, {scope:"프로젝트 settings", origin:o, project:p.path});
+    addKinds(p, o, "프로젝트", p.path);
+  });
+  (sc.plugins||[]).forEach(function(pl){
+    var o = "플러그인 " + (pl.name || pl.key);
+    add(pl.manifest, {scope:"플러그인", origin:o});
+    addAll(pl.skills, {scope:"플러그인 skills", origin:o});
+    addAll(pl.commands, {scope:"플러그인 commands", origin:o});
+  });
+  return set;
+}
+
+/* ---------- 액티비티 바 ---------- */
+function renderActivity(){
+  var bar = clear(document.getElementById("views"));
+  VIEWS.forEach(function(v){
+    var b = el("button", null, v[1]);
     b.setAttribute("role","tab");
-    b.setAttribute("aria-selected", String(S.tab === t[0]));
+    b.setAttribute("aria-selected", String(S.tab === v[0]));
     b.setAttribute("aria-controls","panel");
-    b.id = "tab-"+t[0];
-    b.onclick = function(){ setTab(t[0]); };
+    b.id = "tab-"+v[0];
+    b.title = VIEW_TITLE[v[0]];
+    b.onclick = function(){ setTab(v[0]); };
     bar.appendChild(b);
   });
   document.getElementById("panel").setAttribute("aria-labelledby","tab-"+S.tab);
 }
 function setTab(name){
-  S.seq++;  // 탭 전환 = 이전 요청 무효
+  S.seq++;  // 뷰 전환 = 이전 요청 무효
   S.tab = name;
-  renderTabs();
+  renderActivity();
+  renderTabstrip();
   renderPanel();
 }
+
+/* ---------- 탐색기 트리 ---------- */
+function isOpen(id, dflt){ var v = S.expanded[id]; return v === undefined ? !!dflt : v; }
+function setOpen(id, dflt){ S.expanded[id] = !isOpen(id, dflt); renderTree(); }
+function rowEl(depth){
+  var d = el("div","row d"+depth);
+  d.style.paddingLeft = (6 + depth*14) + "px";
+  return d;
+}
+// 표시명: 하위 폴더 CLAUDE.md 는 프로젝트 기준 상대경로
+function labelOf(f){
+  var m = S.meta[f.path];
+  return (m && m.label) || f.name || f.path || "(이름 없음)";
+}
+function mainBtn(text, num, cls){
+  var b = el("button","mn");
+  b.appendChild(el("span","nm"+(cls?" "+cls:""), text));
+  if(num != null) b.appendChild(el("span","num", String(num)));
+  return b;
+}
+// 접기 행: 화살표는 표시용, 행 전체 버튼이 토글
+function foldRow(parent, depth, id, dflt, label, num, cls){
+  var open = isOpen(id, dflt);
+  var r = rowEl(depth);
+  r.appendChild(el("span","arw", open ? "▾" : "▸"));
+  var b = mainBtn(label, num, cls);
+  b.setAttribute("aria-expanded", String(open));
+  b.setAttribute("data-key", id);
+  b.onclick = function(){ setOpen(id, dflt); };
+  r.appendChild(b);
+  parent.appendChild(r);
+  return open;
+}
+function fileTitle(f, extra){
+  var t = (f.path || "") + " · " + (f.shared ? "팀 공유" : "개인");
+  if(extra) t += " · " + extra;
+  return t;
+}
+function fileRow(parent, depth, f, opts){
+  opts = opts || {};
+  var r = rowEl(depth);
+  if(S.filePath === f.path) r.classList.add("sel");
+  r.appendChild(el("span","arw",""));
+  var b = mainBtn(labelOf(f), null, opts.cls);
+  b.title = fileTitle(f, opts.note);
+  b.setAttribute("data-key", f.path);
+  b.onclick = function(){ openFile(f.path); };
+  r.appendChild(b);
+  parent.appendChild(r);
+}
+// 없는 항목: 클릭 불가 행
+function emptyRow(parent, depth, label){
+  var r = rowEl(depth);
+  r.appendChild(el("span","arw",""));
+  var b = mainBtn(label, null, "off");
+  b.disabled = true;
+  b.setAttribute("aria-disabled","true");
+  r.appendChild(b);
+  parent.appendChild(r);
+}
+function listNode(parent, depth, id, title, arr, kind, proj){
+  arr = arr || [];
+  if(!arr.length) return;
+  var ov = kind ? skillOverrides(proj) : null;
+  if(!foldRow(parent, depth, id, false, title, arr.length)) return;
+  arr.forEach(function(f){
+    var offed = ov && kind !== "agent" && ov[overrideKey(f, kind)] === "off";
+    fileRow(parent, depth+1, f, offed ? {cls:"off", note:"skillOverrides OFF"} : null);
+  });
+}
+function settingsNode(parent, depth, id, obj){
+  var ks = keys(obj);
+  if(!ks.length) return;
+  if(!foldRow(parent, depth, id, false, "settings", ks.length)) return;
+  ks.forEach(function(k){
+    var v = obj[k];
+    if(!v) return;
+    fileRow(parent, depth+1, {path:v.path, name:k, size:v.size, mtime:v.mtime, shared:v.shared});
+  });
+}
+function globalCount(g){
+  return (g.claude_md?1:0) + len(g.rules) + keys(g.settings).length + len(g.skills) + len(g.agents) + len(g.commands);
+}
+function projCount(p){
+  return len(p.claude_md) + len(p.rules) + keys(p.settings).length + len(p.skills) + len(p.agents) + len(p.commands);
+}
+// 재렌더 시 포커스 행 유지 — data-key 로 같은 버튼을 다시 찾는다
+function renderTree(){
+  var t = document.getElementById("tree"), a = document.activeElement;
+  var k = (a && t.contains(a)) ? a.getAttribute("data-key") : null;
+  renderTreeBody();
+  if(!k) return;
+  var all = t.querySelectorAll("[data-key]");
+  for(var i=0;i<all.length;i++){ if(all[i].getAttribute("data-key") === k){ all[i].focus(); return; } }
+}
+function renderTreeBody(){
+  var root = clear(document.getElementById("tree"));
+  var cnt = document.getElementById("exp-count");
+  if(!S.scan){ cnt.textContent = ""; return; }
+  var g = S.scan.global || {};
+  var projects = S.scan.projects || [], plugins = S.scan.plugins || [];
+  cnt.textContent = projects.length + " 프로젝트";
+
+  if(foldRow(root, 0, "g", true, "전역", globalCount(g), "b")){
+    if(g.claude_md) fileRow(root, 1, g.claude_md);
+    else emptyRow(root, 1, "CLAUDE.md 없음");
+    listNode(root, 1, "g.rules", "rules", g.rules);
+    settingsNode(root, 1, "g.settings", g.settings);
+    listNode(root, 1, "g.skills", "skills", g.skills, "skill");
+    listNode(root, 1, "g.agents", "agents", g.agents, "agent");
+    listNode(root, 1, "g.commands", "commands", g.commands, "command");
+  }
+  if(foldRow(root, 0, "p", true, "프로젝트", projects.length, "b")){
+    projects.forEach(function(p){ projectNode(root, p); });
+  }
+  if(foldRow(root, 0, "l", true, "플러그인", plugins.length, "b")){
+    plugins.forEach(function(pl){ pluginNode(root, pl); });
+  }
+}
+// 프로젝트 행은 화살표(접기)와 이름(선택)이 다른 동작 — 버튼 2개
+function projectNode(parent, p){
+  var id = "p:"+p.path, open = isOpen(id, false), gone = p.exists === false;
+  var r = rowEl(1);
+  var sel = S.project && S.project.path === p.path;
+  if(sel) r.classList.add("sel");
+  var tg = el("button","arw", open ? "▾" : "▸");
+  tg.setAttribute("aria-expanded", String(open));
+  tg.setAttribute("aria-label", (p.name||p.path)+" 하위 항목 "+(open?"접기":"펼치기"));
+  tg.disabled = gone;
+  if(gone) tg.textContent = "";
+  tg.setAttribute("data-key", "tg:"+id);
+  tg.onclick = function(){ setOpen(id, false); };
+  r.appendChild(tg);
+  var notes = [];
+  if(gone) notes.push("경로 없음");
+  if(p.coverage === "root-only") notes.push("루트만 · "+(COVER_KO[p.coverage_reason]||p.coverage_reason||"사유 미상"));
+  if(p.truncated || p.incomplete) notes.push("일부만 스캔");
+  var cls = gone ? "gone" : (notes.length ? "warn b" : "b");
+  var d = dedupProj(p);
+  var nb = mainBtn(p.name || p.path, gone ? null : projCount(d), cls);
+  nb.title = p.path + (notes.length ? " · " + notes.join(" · ") : "");
+  nb.setAttribute("data-key", id);
+  if(sel) nb.setAttribute("aria-current","true");
+  nb.onclick = function(){ selectProject(p); };
+  r.appendChild(nb);
+  parent.appendChild(r);
+  if(gone || !open) return;
+  (d.claude_md||[]).forEach(function(f){
+    var lazy = f.scope === "subdir";
+    fileRow(parent, 2, f, lazy ? {cls:"warn", note:"지연 로드"} : null);
+  });
+  listNode(parent, 2, id+".rules", "rules", d.rules);
+  settingsNode(parent, 2, id+".settings", d.settings);
+  listNode(parent, 2, id+".skills", "skills", d.skills, "skill", p);
+  listNode(parent, 2, id+".agents", "agents", d.agents, "agent", p);
+  listNode(parent, 2, id+".commands", "commands", d.commands, "command", p);
+}
+function pluginNode(parent, pl){
+  var id = "l:"+pl.key, gone = pl.exists === false, offed = !gone && pluginOff(pl);
+  var label = (pl.name || pl.key) + " " + (pl.version || "?");
+  var cls = gone ? "gone" : (offed ? "off" : null);
+  var open = foldRow(parent, 1, id, false, label, null, cls);
+  var head = parent.lastChild.querySelector(".mn");
+  head.title = (pl.path || "") + (gone ? " · 경로 없음" : (offed ? " · 플러그인 OFF" : ""));
+  if(gone || !open) return;
+  if(pl.manifest && pl.manifest.path)
+    fileRow(parent, 2, {path:pl.manifest.path, name:"plugin.json", size:pl.manifest.size, mtime:pl.manifest.mtime, shared:pl.manifest.shared});
+  listNode(parent, 2, id+".skills", "skills", pl.skills);
+  listNode(parent, 2, id+".commands", "commands", pl.commands);
+}
+function selectProject(p){
+  S.project = p;
+  renderTree();
+  loadEff();
+  renderInspector();
+  setTab("eff");
+}
+
+/* ---------- 에디터 탭 줄 ---------- */
+function addTab(path){
+  if(S.tabs.some(function(x){ return x.path === path; })) return;   // 이미 열린 탭은 위치 유지
+  var m = S.meta[path] || {};
+  var seg = String(path).split(/[\\/]/);
+  var t = {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
+  S.tabs.push(t);
+  if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
+}
+function closeTab(path){
+  var i = S.tabs.findIndex(function(x){ return x.path === path; });
+  if(i < 0) return;
+  S.tabs.splice(i, 1);
+  if(S.filePath !== path){ renderTabstrip(); return; }
+  var next = S.tabs[i] || S.tabs[i-1];
+  if(next){ openFile(next.path); return; }
+  S.fseq++;    // 진행 중 파일 응답 무효
+  S.file = null; S.fileErr = null; S.filePath = null;
+  renderTree(); renderTabstrip(); renderInspector();
+  if(S.tab === "raw") renderRaw();
+}
+function renderTabstrip(){
+  var strip = clear(document.getElementById("tabstrip"));
+  strip.setAttribute("role","tablist");
+  var path = clear(document.getElementById("pathline"));
+  if(S.tab === "raw"){
+    if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
+    S.tabs.forEach(function(t){
+      var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
+      var b = el("button","tabname");
+      b.setAttribute("role","tab");
+      b.setAttribute("aria-selected", String(t.path === S.filePath));
+      if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
+      b.appendChild(el("span","tf", t.name));
+      if(t.sub) b.appendChild(el("span","ts", t.sub));
+      b.title = t.path;
+      b.onclick = function(){ openFile(t.path); };
+      d.appendChild(b);
+      var x = el("button","tabx","×");
+      x.setAttribute("aria-label", t.name + " 닫기");
+      x.onclick = function(){ closeTab(t.path); };
+      d.appendChild(x);
+      strip.appendChild(d);
+    });
+    path.textContent = S.filePath || "";
+    return;
+  }
+  var label = VIEW_TITLE[S.tab], sub = "";
+  if(S.tab === "eff"){
+    label = "규칙";
+    sub = S.project ? (S.project.name || S.project.path) : "프로젝트 미선택";
+    path.textContent = S.project ? S.project.path : "";
+  }else if(S.tab === "cards"){
+    sub = S.project ? (S.project.name || S.project.path) : "전역 + 플러그인";
+    path.textContent = "전역 + " + (S.project ? S.project.path : "(프로젝트 미선택)") + " + 플러그인";
+  }else{
+    path.textContent = S.scan ? S.scan.home || "" : "";
+  }
+  var d = el("div","tab act");
+  var b = el("button","tabname");
+  b.setAttribute("role","tab");
+  b.setAttribute("aria-selected","true");
+  b.setAttribute("aria-controls","panel");
+  b.appendChild(el("span","tf", label));
+  if(sub) b.appendChild(el("span","ts", sub));
+  b.onclick = function(){ renderPanel(); };
+  d.appendChild(b);
+  strip.appendChild(d);
+}
+
+/* ---------- 패널 ---------- */
 function panel(){ return clear(document.getElementById("panel")); }
 function renderPanel(){
   if(S.tab === "raw") return renderRaw();
@@ -361,12 +598,26 @@ function renderPanel(){
 }
 
 /* 1. 원문 */
+// 파일이 어떤 프로젝트 소속이면 그 프로젝트로 컨텍스트를 맞춘다 (전역·플러그인 파일이면 유지)
+function syncProject(path){
+  var m = S.meta[path];
+  if(!m || !m.project) return;
+  if(S.project && S.project.path === m.project) return;
+  var pr = ((S.scan && S.scan.projects) || []).filter(function(x){ return x.path === m.project; })[0];
+  if(!pr) return;
+  S.project = pr;
+  loadEff();   // 트리·인스펙터 렌더는 openFile 이 이어서 수행
+}
 async function openFile(path, keepTab){
+  syncProject(path);
   S.file = null; S.fileErr = null; S.filePath = path;
-  if(!keepTab) setTab("raw");
-  // 파일은 자체 세대(fseq) + 스캔 세대(sseq)만 본다 — 탭 전환이 진행 중인 파일 응답을 버리지 않게
+  addTab(path);
+  renderTree();
+  if(!keepTab) setTab("raw"); else renderTabstrip();
+  // 파일은 자체 세대(fseq) + 스캔 세대(sseq)만 본다 — 뷰 전환이 진행 중인 파일 응답을 버리지 않게
   var sseq = S.sseq, fseq = ++S.fseq;
   if(S.tab === "raw") renderRaw();  // filePath 기준 "불러오는 중" 표시
+  renderInspector();
   var file = null, err = null;
   try{
     file = await getJSON("/api/file?path="+encodeURIComponent(path));
@@ -376,60 +627,83 @@ async function openFile(path, keepTab){
   if(S.dead || sseq !== S.sseq || fseq !== S.fseq) return;
   S.file = file; S.fileErr = err;
   if(S.tab === "raw") renderRaw();
+  renderInspector();
 }
 function renderRaw(){
   var p = panel();
-  if(S.fileErr){ p.appendChild(el("p","err", S.fileErr)); return; }
-  if(!S.file){ p.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "좌측 트리에서 파일을 선택하세요.")); return; }
-  var f = S.file;
-  p.appendChild(el("div","srchdr")).appendChild(el("span","p", f.path));
-  p.appendChild(el("div","hint","줄바꿈 "+(f.crlf?"CRLF":"LF")+" · BOM "+(f.bom?"있음":"없음")+" · "+kb(f.size)+" · "+ymd(f.mtime)));
-  p.appendChild(el("pre", null, f.text || ""));
+  if(S.fileErr){ p.appendChild(el("div","pad")).appendChild(el("p","err", S.fileErr)); return; }
+  if(!S.file){
+    p.appendChild(el("div","pad")).appendChild(
+      el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
+    return;
+  }
+  var lines = (S.file.text || "").split("\n");
+  var box = el("div","code");
+  // ponytail: 2000줄까지만 줄 단위 행, 나머지는 pre 한 덩어리 (행이 많으면 렌더가 느려짐)
+  var n = Math.min(lines.length, MAX_LINE_ROWS);
+  for(var i=0;i<n;i++){
+    var row = el("div","line");
+    row.appendChild(el("span","ln", String(i+1)));
+    row.appendChild(el("span","src", lines[i]));
+    box.appendChild(row);
+  }
+  if(lines.length > n) box.appendChild(el("pre","rest", lines.slice(n).join("\n")));
+  p.appendChild(box);
 }
 
-/* 2. 유효 규칙 */
-async function renderEff(){
-  var p = panel();
-  if(!S.project){ p.appendChild(el("p","hint","좌측 트리에서 프로젝트 이름을 클릭하면 그 프로젝트에 적용되는 규칙이 순서대로 표시됩니다.")); return; }
-  if(S.project.exists === false){ p.appendChild(el("p","hint","경로가 존재하지 않는 프로젝트입니다.")); return; }
-  p.appendChild(el("h3", null, S.project.name+" 유효 규칙"));
-  p.appendChild(el("div","p hint", S.project.path));
-  var loading = el("p","hint","불러오는 중…");
-  p.appendChild(loading);
-  var items, seq = ++S.seq, proj = S.project.path;
+/* 2. 유효 규칙 — 인스펙터 `함께 적용됨`과 같은 데이터를 공유 */
+async function loadEff(){
+  var proj = (S.project && S.project.exists !== false) ? S.project.path : null;
+  S.eff = null; S.effErr = null;
+  var seq = ++S.eseq;
+  if(!proj) return;
+  var sseq = S.sseq, items = null, err = null;
   try{
     items = await getJSON("/api/effective?project="+encodeURIComponent(proj));
-  }catch(e){
-    if(stale(seq)) return;
-    loading.className = "err"; loading.textContent = "유효 규칙을 불러오지 못했습니다: "+e.message; return;
+  }catch(e){ err = e.message; }
+  if(S.dead || seq !== S.eseq || sseq !== S.sseq) return;
+  if(!S.project || S.project.path !== proj) return;   // 프로젝트가 바뀐 응답은 버린다
+  S.eff = items; S.effErr = err;
+  renderInspector();
+  if(S.tab === "eff") renderEff();
+}
+function renderEff(){
+  var p = panel(), pad = el("div","pad");
+  p.appendChild(pad);
+  if(!S.project){ pad.appendChild(el("p","hint","탐색기에서 프로젝트 이름을 클릭하면 그 프로젝트에 적용되는 규칙이 순서대로 표시됩니다.")); return; }
+  if(S.project.exists === false){ pad.appendChild(el("p","hint","경로가 존재하지 않는 프로젝트입니다.")); return; }
+  if(S.effErr){
+    pad.appendChild(el("p","err","유효 규칙을 불러오지 못했습니다: "+S.effErr));
+    pad.appendChild(retryBtn(loadEff));
+    return;
   }
-  if(stale(seq) || S.tab !== "eff" || !S.project || S.project.path !== proj) return;
-  loading.remove();
-  if(!items.length){ p.appendChild(el("p","hint","적용되는 규칙 파일이 없습니다.")); return; }
-  for(var i=0;i<items.length;i++){
-    var it = items[i];
-    var wrap = el("div", it.lazy ? "lazy" : null);
-    var h = el("div","srchdr");
+  if(!S.eff){ pad.appendChild(el("p","hint","불러오는 중…")); return; }
+  if(!S.eff.length){ pad.appendChild(el("p","hint","적용되는 규칙 파일이 없습니다.")); return; }
+  var seq = S.seq;
+  S.eff.forEach(function(it, i){
+    var wrap = el("div","rule"+(it.lazy ? " lazy" : ""));
+    var h = el("div","rhd");
+    h.appendChild(el("span","rnum", String(i+1)));
     h.appendChild(el("strong", null, SCOPE_KO[it.scope] || it.scope));
-    h.appendChild(badge(it.shared ? "팀 공유" : "개인", it.shared ? "shared" : "personal"));
+    h.appendChild(badge(it.shared ? "팀 공유" : "개인", it.shared ? "shared" : null));
     if(it.lazy) h.appendChild(badge("해당 폴더 작업 시 지연 로드","warn"));
     h.appendChild(el("span","p", it.path));
     wrap.appendChild(h);
+    var det = el("details"); det.open = true;
+    det.appendChild(el("summary", null, "본문"));
     var pre = el("pre", null, "불러오는 중…");
-    wrap.appendChild(pre);
-    p.appendChild(wrap);
-    /* eslint-disable no-loop-func */
-    (function(pre, path){
-      getJSON("/api/file?path="+encodeURIComponent(path)).then(function(f){
-        if(stale(seq)) return;
-        pre.textContent = f.text || "";
-      }, function(e){
-        if(stale(seq)) return;
-        pre.textContent = "본문을 불러오지 못했습니다: "+e.message;
-        pre.className = "err";
-      });
-    })(pre, it.path);
-  }
+    det.appendChild(pre);
+    wrap.appendChild(det);
+    pad.appendChild(wrap);
+    getJSON("/api/file?path="+encodeURIComponent(it.path)).then(function(f){
+      if(stale(seq)) return;
+      pre.textContent = f.text || "";
+    }, function(e){
+      if(stale(seq)) return;
+      pre.textContent = "본문을 불러오지 못했습니다: "+e.message;
+      pre.className = "err";
+    });
+  });
 }
 
 /* 3. 스킬·에이전트·커맨드 */
@@ -471,32 +745,31 @@ function collect(){
   return out;
 }
 function renderCards(){
-  var p = panel();
+  var p = panel(), pad = el("div","pad");
+  p.appendChild(pad);
   if(!S.scan) return;
   var list = collect();
-  var note = "전역 + " + (S.project
-      ? "프로젝트 "+(S.project.name || S.project.path) + (S.project.exists === false ? " (경로 없음)" : "")
-      : "(프로젝트 미선택)") + " + 플러그인 · 총 "+list.length+"개";
-  p.appendChild(el("p","hint", note));
+  pad.appendChild(el("p","hint", "총 "+list.length+"개"
+    + (S.project && S.project.exists === false ? " · 선택 프로젝트 경로 없음" : "")));
   var grid = el("div","cards");
   list.forEach(function(c){
     var card = el("div","card"+(c.off?" dim":""));
-    var h = el("h4", null, c.name);
-    card.appendChild(h);
-    var kv = el("div","kv", c.kind+" · "+c.origin);
-    card.appendChild(kv);
+    card.appendChild(el("h4", null, c.name));
+    card.appendChild(el("div","kv", c.kind+" · "+c.origin));
     if(c.off) card.appendChild(badge(c.offLabel || "OFF","off"));
-    var d = el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음");
-    card.appendChild(d);
+    card.appendChild(el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음"));
     card.title = c.path;
     grid.appendChild(card);
   });
-  p.appendChild(grid);
+  pad.appendChild(grid);
 }
 
 /* 4. 훅 흐름 */
+function hookCmds(h){
+  return Array.isArray(h.commands) ? h.commands : (h.commands ? [h.commands] : []);
+}
 function hookSource(src){
-  src = src || "";
+  src = String(src || "");
   if(src.indexOf("global:") === 0) return {cls:"global", label:"전역 · "+src.slice(7)};
   if(src.indexOf("plugin:") === 0) return {cls:"plugin", label:"플러그인 · "+src.slice(7)};
   if(src.indexOf("project:") === 0){
@@ -506,10 +779,7 @@ function hookSource(src){
   }
   return {cls:"", label:src || "출처 미상"};
 }
-function renderHooks(){
-  var p = panel();
-  var hooks = (S.scan && S.scan.hooks) || [];
-  if(!hooks.length){ p.appendChild(el("p","hint","등록된 훅이 없습니다.")); return; }
+function groupHooks(hooks){
   // 이벤트명이 constructor/__proto__ 여도 안전하도록 프로토타입 없는 객체
   var order = [], byEvent = Object.create(null);
   hooks.forEach(function(h){
@@ -517,9 +787,17 @@ function renderHooks(){
     if(!byEvent[e]){ byEvent[e] = []; order.push(e); }
     byEvent[e].push(h);
   });
-  order.forEach(function(ev){
-    p.appendChild(el("div","hookev", ev+" ("+byEvent[ev].length+")"));
-    byEvent[ev].forEach(function(h){
+  return {order:order, byEvent:byEvent};
+}
+function renderHooks(){
+  var p = panel(), pad = el("div","pad");
+  p.appendChild(pad);
+  var hooks = (S.scan && S.scan.hooks) || [];
+  if(!hooks.length){ pad.appendChild(el("p","hint","등록된 훅이 없습니다.")); return; }
+  var g = groupHooks(hooks);
+  g.order.forEach(function(ev){
+    pad.appendChild(el("div","hookev", ev+" ("+g.byEvent[ev].length+")"));
+    g.byEvent[ev].forEach(function(h){
       var src = hookSource(h.source);
       var row = el("div","hookrow "+src.cls);
       var head = el("div");
@@ -528,19 +806,20 @@ function renderHooks(){
       head.appendChild(badge(src.label));
       if(h.warn === "duplicate-star") head.appendChild(badge("* 매처와 중복 발화","warn"));
       row.appendChild(head);
-      (h.commands || []).forEach(function(c){
+      hookCmds(h).forEach(function(c){
         row.appendChild(el("div","cmd", "→ "+c));
       });
-      p.appendChild(row);
+      pad.appendChild(row);
     });
   });
 }
 
 /* 5. MCP */
 function renderMcp(){
-  var p = panel();
+  var p = panel(), pad = el("div","pad");
+  p.appendChild(pad);
   var mcp = (S.scan && S.scan.mcp) || [];
-  var order = [], bySrc = Object.create(null);
+  var order = [], bySrc = Object.create(null), ptitle = Object.create(null);
   mcp.forEach(function(m){
     var s = m.source || "(출처 없음)";
     if(!bySrc[s]){ bySrc[s] = []; order.push(s); }
@@ -549,30 +828,32 @@ function renderMcp(){
   // 플러그인 manifest 의 mcpServers — 있는 플러그인만 그룹 추가
   ((S.scan && S.scan.plugins) || []).forEach(function(pl){
     if(pl.exists === false) return;
-    var srv = pl.mcp_servers || {}, names = Object.keys(srv);
+    var srv = pl.mcp_servers || {}, names = keys(srv);
     if(!names.length) return;
-    var key = "plugin:"+(pl.name || pl.key);
+    var key = "plugin:"+pl.key;
     if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
+    ptitle[key] = "플러그인 · " + (pl.name || pl.key);
     names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
   });
   // 프로젝트 루트 .mcp.json — 선택 프로젝트가 있으면 그 프로젝트만
   var projs = (S.project && S.project.exists !== false) ? [S.project] : ((S.scan && S.scan.projects) || []);
-  projs.forEach(function(p){
-    var mj = p.mcp_json;
+  projs.forEach(function(pr){
+    var mj = pr.mcp_json;
     if(!mj || !mj.data || typeof mj.data !== "object") return;
-    var srv = mj.data.mcpServers || {}, names = Object.keys(srv);
+    var srv = mj.data.mcpServers || {}, names = keys(srv);
     if(!names.length) return;
-    var key = "pmcp:"+(mj.path || p.path || "");
+    var key = "pmcp:"+(mj.path || pr.path || "");
     if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
     names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
   });
-  if(!order.length){ p.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
+  if(!order.length){ pad.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
   order.forEach(function(s){
-    p.appendChild(el("h3", null, s === "global" ? "전역"
+    pad.appendChild(el("h3", null, ptitle[s] ? ptitle[s]
+      : s === "global" ? "전역"
       : s.indexOf("pmcp:") === 0 ? "프로젝트 .mcp.json · "+s.slice(5)
       : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
       : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s));
-    var tb = el("table");
+    var wrap = el("div","tblwrap"), tb = el("table");
     var thead = el("thead"), tr = el("tr");
     ["이름","command / url","기타 설정"].forEach(function(t){ tr.appendChild(el("th", null, t)); });
     thead.appendChild(tr); tb.appendChild(thead);
@@ -582,9 +863,9 @@ function renderMcp(){
       r.appendChild(el("td", null, m.name || ""));
       r.appendChild(el("td", null, cfg.command || cfg.url || "-"));
       var rest = {};
-      Object.keys(cfg).forEach(function(k){ if(k !== "command" && k !== "url") rest[k] = cfg[k]; });
+      keys(cfg).forEach(function(k){ if(k !== "command" && k !== "url") rest[k] = cfg[k]; });
       var td = el("td");
-      if(Object.keys(rest).length){
+      if(keys(rest).length){
         var det = el("details");
         det.appendChild(el("summary", null, "JSON"));
         det.appendChild(el("pre", null, JSON.stringify(rest, null, 1)));
@@ -596,70 +877,218 @@ function renderMcp(){
       tbody.appendChild(r);
     });
     tb.appendChild(tbody);
-    p.appendChild(tb);
+    wrap.appendChild(tb);
+    pad.appendChild(wrap);
   });
 }
 
-/* ---------- 부트 ---------- */
-// 재스캔 후 선택 복원용: scan 결과에 등장하는 파일 경로 집합 (API 계약과 동일 범위)
-function scanPaths(sc){
-  var set = Object.create(null);
-  function add(f){ if(f && f.path) set[f.path] = true; }
-  function addAll(a){ (a||[]).forEach(add); }
-  function addSettings(o){ Object.keys(o||{}).forEach(function(k){ add(o[k]); }); }
-  function addKinds(o){ addAll(o.skills); addAll(o.agents); addAll(o.commands); }
-  var g = sc.global || {};
-  add(g.claude_md); addAll(g.rules); addSettings(g.settings); addKinds(g);
-  (sc.projects||[]).forEach(function(p){
-    addAll(p.claude_md); addAll(p.rules); addSettings(p.settings); addKinds(p);
-  });
-  (sc.plugins||[]).forEach(function(pl){ add(pl.manifest); addAll(pl.skills); addAll(pl.commands); });
-  return set;
+/* ---------- 인스펙터 ---------- */
+function section(parent, title){
+  var s = el("section");
+  s.appendChild(el("div","sec-t", title));
+  parent.appendChild(s);
+  return s;
 }
+function kvRow(grid, k, v, cls){
+  grid.appendChild(el("span","k", k));
+  grid.appendChild(el("span","v"+(cls?" "+cls:""), v));
+}
+function renderInspector(){
+  var ins = clear(document.getElementById("inspector"));
+  /* 스캔 */
+  var sc = section(ins, "스캔");
+  var g1 = el("div","kvgrid");
+  if(S.scan){
+    kvRow(g1, "시각", new Date(S.scan.scanned_at).toLocaleString("ko-KR"));
+    var v = S.scan.claude_version, c = cmpVer(v);
+    kvRow(g1, "Claude Code", c === null ? "미확인" : v, c === null ? "warn" : null);
+    if(c === null) kvRow(g1, "경고", "버전 미확인 — 스킬 토글 지원 여부 확인 불가", "warn");
+    else if(c < 0) kvRow(g1, "경고", "스킬 토글 미지원 버전", "warn");
+  }else{
+    kvRow(g1, "시각", S.loading ? "스캔 중…" : "-");
+  }
+  sc.appendChild(g1);
+  if(S.msg) sc.appendChild(el("div","err", S.msg));
+  if(S.scanErr) sc.appendChild(retryBtn(loadScan));
+  var errs = (S.scan && S.scan.errors) || [];
+  if(errs.length){
+    var eb = el("button","linkbtn","오류 "+errs.length+"건");
+    eb.setAttribute("aria-expanded", String(S.errOpen));
+    eb.onclick = function(){ S.errOpen = !S.errOpen; renderInspector(); };
+    sc.appendChild(eb);
+    if(S.errOpen){
+      var list = el("div"); list.id = "errlist";
+      errs.forEach(function(e){ list.appendChild(el("div", null, (e.path||"")+" — "+(e.error||""))); });
+      sc.appendChild(list);
+    }
+  }
+  /* 속성 */
+  var ps = section(ins, "속성");
+  var g2 = el("div","kvgrid"), any = false;
+  if(S.filePath){
+    any = true;
+    var m = S.meta[S.filePath] || {};
+    kvRow(g2, "범위", m.scope || "-");
+    kvRow(g2, "출처", m.origin || "-");
+    kvRow(g2, "공유", m.shared ? "팀 공유 (git 추적)" : "개인", m.shared ? "shared" : null);
+    if(m.lazy) kvRow(g2, "적재", "지연 로드 (해당 폴더 작업 시)", "warn");
+    if(S.file){
+      kvRow(g2, "크기", kb(S.file.size));
+      kvRow(g2, "수정", ymd(S.file.mtime));
+      kvRow(g2, "줄바꿈", (S.file.crlf ? "CRLF" : "LF") + " · BOM " + (S.file.bom ? "있음" : "없음"));
+    }else if(S.fileErr){
+      kvRow(g2, "본문", "불러오지 못함", "warn");
+    }else{
+      kvRow(g2, "본문", "불러오는 중…");
+    }
+  }
+  if(!S.filePath && S.fileErr){
+    any = true;
+    kvRow(g2, "파일", S.fileErr, "warn");
+  }
+  if(S.project){
+    any = true;
+    if(S.filePath || S.fileErr) g2.appendChild(el("span","k"," ")), g2.appendChild(el("span","v"," "));
+    var p = S.project;
+    kvRow(g2, "프로젝트", p.name || p.path);
+    kvRow(g2, "경로", p.path);
+    if(p.exists === false) kvRow(g2, "상태", "경로 없음", "warn");
+    else{
+      kvRow(g2, "스캔 범위", p.coverage === "root-only"
+        ? "루트만 · " + (COVER_KO[p.coverage_reason] || p.coverage_reason || "사유 미상")
+        : "전체", p.coverage === "root-only" ? "warn" : null);
+      if(p.truncated || p.incomplete) kvRow(g2, "완결성", "일부만 스캔", "warn");
+      kvRow(g2, "git", p.git ? "예" : "아니오");
+    }
+  }
+  if(!any) ps.appendChild(el("div","hint","파일이나 프로젝트를 선택하면 속성이 표시됩니다."));
+  else ps.appendChild(g2);
+  /* 함께 적용됨 */
+  var es = section(ins, "함께 적용됨");
+  if(!S.project) es.appendChild(el("div","hint","프로젝트를 선택하세요."));
+  else if(S.project.exists === false) es.appendChild(el("div","hint","경로가 존재하지 않는 프로젝트입니다."));
+  else if(S.effErr){
+    es.appendChild(el("div","err","불러오지 못했습니다: "+S.effErr));
+    es.appendChild(retryBtn(loadEff));
+  }
+  else if(!S.eff) es.appendChild(el("div","hint","불러오는 중…"));
+  else if(!S.eff.length) es.appendChild(el("div","hint","적용되는 규칙 파일이 없습니다."));
+  else{
+    var list2 = el("div","efflist");
+    S.eff.forEach(function(it, i){
+      var cur = it.path === S.filePath, im = S.meta[it.path] || {};
+      var row = el("div","effitem"+(cur ? " cur" : "")+(it.lazy ? " lazyit" : ""));
+      row.title = it.path;
+      row.appendChild(el("span","n", String(i+1)));
+      row.appendChild(el("span", null, (im.label || it.path) + (cur ? "  ← 현재" : "") + (it.lazy ? " · 지연" : "")));
+      list2.appendChild(row);
+    });
+    es.appendChild(list2);
+  }
+  /* 이 프로젝트의 훅 */
+  var hs = section(ins, "이 프로젝트의 훅");
+  if(!S.project || S.project.exists === false) hs.appendChild(el("div","hint","프로젝트를 선택하세요."));
+  else{
+    var pref = "project:" + S.project.path + ":";
+    var mine = ((S.scan && S.scan.hooks) || []).filter(function(h){ return String(h.source||"").indexOf(pref) === 0; });
+    if(!mine.length) hs.appendChild(el("div","hint","이 프로젝트에서 등록한 훅이 없습니다."));
+    else{
+      var hl = el("div","hooklist");
+      mine.forEach(function(h){
+        var line = (h.event||"?") + " · " + (h.matcher || "(없음)") + " → " + (hookCmds(h).join(", ") || "(명령 없음)");
+        var d = el("div","hookitem", line);
+        if(h.warn === "duplicate-star"){
+          d.appendChild(el("span","warn", " · * 매처와 중복 발화"));
+        }
+        hl.appendChild(d);
+      });
+      hs.appendChild(hl);
+    }
+  }
+  ins.appendChild(el("div","spacer"));
+  var acts = el("div","acts");
+  var re = el("button", null, S.loading ? "스캔 중…" : "재스캔");
+  re.disabled = S.loading; re.onclick = loadScan; acts.appendChild(re);
+  var sd = el("button", null, "종료"); sd.onclick = shutdown; acts.appendChild(sd);
+  ins.appendChild(acts);
+}
+async function shutdown(){
+  if(S.dead) return;
+  var fail = null;
+  try{
+    var r = await fetch("/api/shutdown",{method:"POST"}), b = null;
+    try{ b = await r.json(); }catch(e){}
+    if(!r.ok || !b || b.ok !== true) fail = (b && b.error) || ("HTTP "+r.status);
+  }catch(e){ fail = e.message; }
+  if(fail){  // 실패면 UI 유지, 인스펙터에만 표시
+    S.msg = "종료하지 못했습니다: "+fail;
+    renderInspector();
+    return;
+  }
+  S.dead = true;
+  document.body.textContent = "";
+  var p = el("p",null,"서버가 종료되었습니다");
+  p.style.padding = "24px";
+  document.body.appendChild(p);
+}
+
+/* ---------- 부트 ---------- */
 async function loadScan(){
   if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
-  var seq = ++S.sseq;               // 스캔 세대는 탭 전환(S.seq)과 무관
-  S.loading = true; S.msg = null;
-  renderTop();
-  clear(document.getElementById("tree")).appendChild(el("p","hint","스캔 중…"));
-  panel().appendChild(el("p","hint","스캔 중…"));
+  var seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관 · 실패해도 되돌리지 않는다
+  S.loading = true; S.msg = null; S.scanErr = false;
+  renderInspector();
+  clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
+  panel().appendChild(el("div","pad hint","스캔 중…"));
   var scan = null, err = null;
   try{
     scan = await getJSON(SAMPLE ? "./scan-sample.json" : "/api/scan");
   }catch(e){ err = e.message; }
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
-  if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 탭과 어긋나지 않게
-    renderTop();
+  if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
+    S.msg = "스캔에 실패했습니다: "+err; S.scanErr = true;
     if(S.scan) renderTree();
-    var q = panel();
-    q.appendChild(el("p","err","스캔에 실패했습니다: "+err));
-    var b = el("button","btn","다시 시도"); b.onclick = loadScan; q.appendChild(b);
+    // 세대(sseq)는 되돌리지 않는다 — 스캔 중 도착해 폐기된 응답은 지금 다시 요청해 복구
+    // 복구 호출을 패널 렌더보다 먼저 — 복구가 패널을 다시 그려도 오류는 인스펙터에 남는다
+    if(S.project && !S.eff && !S.effErr) loadEff();
+    if(S.filePath && !S.file && !S.fileErr) openFile(S.filePath, true);
+    renderInspector();
+    var q = panel(), qp = el("div","pad");
+    q.appendChild(qp);
+    qp.appendChild(el("p","err", S.msg));
+    qp.appendChild(retryBtn(loadScan));
     return;
   }
   S.scan = scan;
+  S.meta = scanIndex(scan);
   S.seq++;   // 이전 스캔 기준으로 날아간 패널 요청 무효화
   // 이전 선택 복원
   S.project = null; S.file = null; S.fileErr = null; S.filePath = null;
+  S.eff = null; S.effErr = null; S.eseq++;
+  S.tabs = S.tabs.filter(function(t){ return !!S.meta[t.path]; });
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
     else S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject;
   }
-  if(prevFile && !scanPaths(scan)[prevFile]){
+  if(prevFile && !S.meta[prevFile]){
     S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
     prevFile = null;
   }
-  renderTop();
-  renderErrors();
+  if(S.project) loadEff();
+  renderActivity();
   renderTree();
-  renderTabs();
+  renderTabstrip();
+  renderInspector();
   renderPanel();
   if(prevFile) openFile(prevFile, true);
 }
-renderTabs();
+renderActivity();
+renderTabstrip();
+renderInspector();
 loadScan();
 </script>
 </body>
