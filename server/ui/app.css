@@ -278,6 +278,27 @@ textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none
 .iss.warnlv{color:var(--warn)}
 .iss .rl{font:11px/1.5 var(--mono);color:var(--muted);margin-right:6px}
 
+/* 편집 도우미 (F9) */
+.assist{flex:none;border-bottom:1px solid var(--bd);background:var(--bg)}
+.arow{display:flex;gap:6px;padding:6px 10px;align-items:flex-start}
+textarea.aprompt{flex:1;min-height:26px;max-height:6em;resize:vertical;font:inherit;
+                 color:var(--fg);background:var(--bar);border:1px solid var(--bd);
+                 border-radius:5px;padding:3px 8px}
+textarea.aprompt[disabled]{color:var(--muted)}
+select.amodel{font:inherit;font-size:11px;padding:3px 6px;color:var(--fg);background:var(--ed);
+              border:1px solid var(--bd);border-radius:4px}
+.amsg{padding:0 10px 6px;font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.amsg.err{color:var(--err)}
+.amsg .linkbtn{color:var(--acc)}
+pre.diffview{margin:0 10px 6px;max-height:40%;overflow:auto;font:11px/1.5 var(--mono);
+             white-space:pre-wrap;word-break:break-all;border:1px solid var(--bd);
+             border-radius:5px;padding:6px 8px;background:var(--ed)}
+.diffview .add{color:var(--green)}
+.diffview .del{color:var(--err)}
+.diffview .hunk{color:var(--acc)}
+.aacts{display:flex;gap:8px;padding:0 10px 8px}
+.assist [hidden]{display:none}
+
 @media (max-width:900px){
   #app{grid-template-columns:56px 220px 1fr;grid-template-rows:1fr auto 28px}
   #activity{grid-column:1;grid-row:1/4}
