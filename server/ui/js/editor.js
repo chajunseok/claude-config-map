@@ -27,13 +27,18 @@ function renderTabstrip(){
   var strip = clear(document.getElementById("tabstrip"));
   strip.setAttribute("role","tablist");
   if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
+  // 같은 이름·출처 탭이 여럿이면(SKILL.md 등) 상위 폴더를 붙여 구분 — 경로는 다르므로 중복 탭이 아니다
+  var seen = Object.create(null);
+  S.tabs.forEach(function(t){ var k = t.name + "|" + t.sub; seen[k] = (seen[k] || 0) + 1; });
   S.tabs.forEach(function(t){
     var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
     var b = el("button","tabname");
     b.setAttribute("role","tab");
     b.setAttribute("aria-selected", String(t.path === S.filePath));
     if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
-    b.appendChild(el("span","tf", t.name));
+    var seg = String(t.path).split(/[\\/]/), shown = t.name;
+    if(!isCompare(t.path) && seen[t.name + "|" + t.sub] > 1 && seg.length > 1) shown = seg[seg.length-2] + "/" + t.name;
+    b.appendChild(el("span","tf", shown));
     if(t.sub) b.appendChild(el("span","ts", t.sub));
     b.title = t.path;
     b.onclick = function(){ openFile(t.path); };
