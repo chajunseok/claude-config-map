@@ -1,0 +1,13 @@
+{
+  "name": "config-map",
+  "version": "0.1.0",
+  "description": "Visualize every local Claude Code config (CLAUDE.md, settings, skills, hooks, plugins, MCP) in one browser view",
+  "author": {
+    "name": "junseok.cha",
+    "url": "https://github.com/chajunseok"
+  },
+  "repository": "https://github.com/chajunseok/claude-config-map",
+  "commands": [
+    "./commands/"
+  ]
+}
