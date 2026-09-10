@@ -8,7 +8,7 @@
 /* 다크 기본 + prefers-color-scheme: light 오버라이드. 외부 리소스 0. */
 :root{
   --bg:#191b1f; --bar:#13151a; --ed:#1e2126; --bd:#2b2f36;
-  --fg:#d7dae0; --muted:#7d8590; --dim:#555c66; --val:#aeb4bd;
+  --fg:#d7dae0; --muted:#7d8590; --val:#aeb4bd;
   --acc:#8ab4f8; --sel:#2b3a55; --selfg:#ffffff;
   --green:#7ee2a8; --warn:#e3b341; --err:#ff8f8a;
   --hover:#23262c; --purple:#c29bf5;
@@ -18,7 +18,7 @@
 @media (prefers-color-scheme: light){
   :root{
     --bg:#fafbfc; --bar:#f1f4f7; --ed:#ffffff; --bd:#dfe3e8;
-    --fg:#1c2430; --muted:#6b7684; --dim:#9aa3ad; --val:#454f5b;
+    --fg:#1c2430; --muted:#6b7684; --val:#454f5b;
     --acc:#3b5bdb; --sel:#dbe7ff; --selfg:#1c2430;
     --green:#1f6b3f; --warn:#a86800; --err:#b3261e;
     --hover:#eaeef3; --purple:#6a3fb0;
@@ -53,8 +53,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .num{font:11px/1 var(--mono);color:var(--muted);flex:none}
 .b{font-weight:600}
 .warn{color:var(--warn)}
-.off{color:var(--dim)}
-.gone{text-decoration:line-through;color:var(--dim)}
+.off{color:var(--muted)}
+.gone{text-decoration:line-through;color:var(--muted)}
 
 /* ---- 에디터 ---- */
 #editor{background:var(--ed);min-width:0;display:flex;flex-direction:column;overflow:hidden}
@@ -66,13 +66,14 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .tab .ts{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tab .tabx{padding:5px 8px;color:var(--muted);line-height:1}
 .tab .tabx:hover{color:var(--fg);background:var(--hover)}
-.tab.empty{padding:5px 10px;color:var(--dim);border-right:0}
+.tab.empty{padding:5px 10px;color:var(--muted);border-right:0}
 #pathline{flex:none;font:11px/1.6 var(--mono);color:var(--muted);padding:4px 12px;border-bottom:1px solid var(--bd);word-break:break-all}
 #panel{flex:1;overflow:auto;min-width:0}
-.code{display:grid;grid-template-columns:40px 1fr;font:12px/1.7 var(--mono)}
-.code pre{margin:0;padding:8px 0}
-.code .ln{text-align:right;padding-right:8px;color:var(--dim);user-select:none;white-space:pre}
-.code .src{padding-left:10px;color:var(--fg);white-space:pre;overflow-x:auto}
+.code{font:12px/1.7 var(--mono);padding:8px 0}
+.line{display:grid;grid-template-columns:40px 1fr}
+.line .ln{text-align:right;padding-right:8px;color:var(--muted);user-select:none;white-space:pre}
+.line .src{min-width:0;padding-left:10px;color:var(--fg);white-space:pre-wrap;word-break:break-all}
+.code pre.rest{margin:0;padding-left:50px;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
 .pad{padding:12px 14px}
 .hint{color:var(--muted)}
 .err{color:var(--err)}
@@ -96,7 +97,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .card h4{margin:0 0 4px;font-size:13px;word-break:break-all}
 .card .kv{color:var(--muted);font-size:11px;margin-bottom:4px}
 .card .desc{font-size:12px;max-height:9em;overflow:auto;color:var(--val)}
-.card .desc.none{color:var(--dim)}
+.card .desc.none{color:var(--muted)}
 /* 훅 뷰 */
 .hookev{margin:14px 0 6px;font-weight:600}
 .hookrow{border-left:3px solid var(--bd);padding:5px 10px;margin:5px 0;background:var(--bg);border-radius:0 4px 4px 0}
@@ -130,7 +131,7 @@ h3{font-size:13px;margin:14px 0 6px}
 .acts{display:flex;gap:8px}
 .acts button{flex:1;border:1px solid var(--bd);border-radius:4px;padding:5px;text-align:center;color:var(--fg)}
 .acts button:hover{background:var(--hover)}
-.acts button[disabled]{color:var(--dim);cursor:default}
+.acts button[disabled]{color:var(--muted);cursor:default}
 .linkbtn{color:var(--err);text-decoration:underline;padding:0}
 #errlist{margin-top:6px;display:flex;flex-direction:column;gap:4px}
 #errlist div{color:var(--err);word-break:break-all;font-size:11px}
@@ -172,13 +173,15 @@ var SCOPE_KO = {global:"전역",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
 var MAX_TABS = 6;
+var MAX_LINE_ROWS = 2000;
 // seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관), fseq: 파일 세대, eseq: 유효 규칙 세대
 // dead: 서버 종료 후 렌더 중단
 var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null,
          seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false,
          tabs:[], meta:Object.create(null), expanded:Object.create(null),
-         eff:null, effErr:null, effProj:null, errOpen:false};
+         eff:null, effErr:null, errOpen:false};
 function stale(seq){ return S.dead || seq !== S.seq; }
+function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
 
@@ -345,6 +348,16 @@ function fileRow(parent, depth, f, opts){
   r.appendChild(b);
   parent.appendChild(r);
 }
+// 없는 항목: 클릭 불가 행
+function emptyRow(parent, depth, label){
+  var r = rowEl(depth);
+  r.appendChild(el("span","arw",""));
+  var b = mainBtn(label, null, "off");
+  b.disabled = true;
+  b.setAttribute("aria-disabled","true");
+  r.appendChild(b);
+  parent.appendChild(r);
+}
 function listNode(parent, depth, id, title, arr, kind){
   arr = arr || [];
   if(!arr.length) return;
@@ -380,6 +393,7 @@ function renderTree(){
 
   if(foldRow(root, 0, "g", true, "전역", globalCount(g), "b")){
     if(g.claude_md) fileRow(root, 1, g.claude_md);
+    else emptyRow(root, 1, "CLAUDE.md 없음");
     listNode(root, 1, "g.rules", "rules", g.rules);
     settingsNode(root, 1, "g.settings", g.settings);
     listNode(root, 1, "g.skills", "skills", g.skills, "skill");
@@ -451,10 +465,10 @@ function selectProject(p){
 
 /* ---------- 에디터 탭 줄 ---------- */
 function addTab(path){
+  if(S.tabs.some(function(x){ return x.path === path; })) return;   // 이미 열린 탭은 위치 유지
   var m = S.meta[path] || {};
   var seg = String(path).split(/[\\/]/);
   var t = {path:path, name: seg[seg.length-1] || path, sub: m.origin || ""};
-  S.tabs = S.tabs.filter(function(x){ return x.path !== path; });
   S.tabs.push(t);
   if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
 }
@@ -472,12 +486,16 @@ function closeTab(path){
 }
 function renderTabstrip(){
   var strip = clear(document.getElementById("tabstrip"));
+  strip.setAttribute("role","tablist");
   var path = clear(document.getElementById("pathline"));
   if(S.tab === "raw"){
     if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
     S.tabs.forEach(function(t){
       var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
       var b = el("button","tabname");
+      b.setAttribute("role","tab");
+      b.setAttribute("aria-selected", String(t.path === S.filePath));
+      if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
       b.appendChild(el("span","tf", t.name));
       if(t.sub) b.appendChild(el("span","ts", t.sub));
       b.title = t.path;
@@ -505,6 +523,9 @@ function renderTabstrip(){
   }
   var d = el("div","tab act");
   var b = el("button","tabname");
+  b.setAttribute("role","tab");
+  b.setAttribute("aria-selected","true");
+  b.setAttribute("aria-controls","panel");
   b.appendChild(el("span","tf", label));
   if(sub) b.appendChild(el("span","ts", sub));
   b.onclick = function(){ renderPanel(); };
@@ -551,19 +572,24 @@ function renderRaw(){
       el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
     return;
   }
-  var text = S.file.text || "";
-  var lines = text.split("\n"), nums = "";
-  for(var i=1;i<=lines.length;i++) nums += i + "\n";
+  var lines = (S.file.text || "").split("\n");
   var box = el("div","code");
-  box.appendChild(el("pre","ln", nums));
-  box.appendChild(el("pre","src", text));
+  // ponytail: 2000줄까지만 줄 단위 행, 나머지는 pre 한 덩어리 (행이 많으면 렌더가 느려짐)
+  var n = Math.min(lines.length, MAX_LINE_ROWS);
+  for(var i=0;i<n;i++){
+    var row = el("div","line");
+    row.appendChild(el("span","ln", String(i+1)));
+    row.appendChild(el("span","src", lines[i]));
+    box.appendChild(row);
+  }
+  if(lines.length > n) box.appendChild(el("pre","rest", lines.slice(n).join("\n")));
   p.appendChild(box);
 }
 
 /* 2. 유효 규칙 — 인스펙터 `함께 적용됨`과 같은 데이터를 공유 */
 async function loadEff(){
   var proj = (S.project && S.project.exists !== false) ? S.project.path : null;
-  S.eff = null; S.effErr = null; S.effProj = proj;
+  S.eff = null; S.effErr = null;
   var seq = ++S.eseq;
   if(!proj) return;
   var sseq = S.sseq, items = null, err = null;
@@ -581,7 +607,11 @@ function renderEff(){
   p.appendChild(pad);
   if(!S.project){ pad.appendChild(el("p","hint","탐색기에서 프로젝트 이름을 클릭하면 그 프로젝트에 적용되는 규칙이 순서대로 표시됩니다.")); return; }
   if(S.project.exists === false){ pad.appendChild(el("p","hint","경로가 존재하지 않는 프로젝트입니다.")); return; }
-  if(S.effErr){ pad.appendChild(el("p","err","유효 규칙을 불러오지 못했습니다: "+S.effErr)); return; }
+  if(S.effErr){
+    pad.appendChild(el("p","err","유효 규칙을 불러오지 못했습니다: "+S.effErr));
+    pad.appendChild(retryBtn(loadEff));
+    return;
+  }
   if(!S.eff){ pad.appendChild(el("p","hint","불러오는 중…")); return; }
   if(!S.eff.length){ pad.appendChild(el("p","hint","적용되는 규칙 파일이 없습니다.")); return; }
   var seq = S.seq;
@@ -590,7 +620,7 @@ function renderEff(){
     var h = el("div","rhd");
     h.appendChild(el("span","rnum", String(i+1)));
     h.appendChild(el("strong", null, SCOPE_KO[it.scope] || it.scope));
-    h.appendChild(badge(it.shared ? "팀 공유" : "개인", it.shared ? "shared" : "personal"));
+    h.appendChild(badge(it.shared ? "팀 공유" : "개인", it.shared ? "shared" : null));
     if(it.lazy) h.appendChild(badge("해당 폴더 작업 시 지연 로드","warn"));
     h.appendChild(el("span","p", it.path));
     wrap.appendChild(h);
@@ -862,7 +892,10 @@ function renderInspector(){
   var es = section(ins, "함께 적용됨");
   if(!S.project) es.appendChild(el("div","hint","프로젝트를 선택하세요."));
   else if(S.project.exists === false) es.appendChild(el("div","hint","경로가 존재하지 않는 프로젝트입니다."));
-  else if(S.effErr) es.appendChild(el("div","err","불러오지 못했습니다: "+S.effErr));
+  else if(S.effErr){
+    es.appendChild(el("div","err","불러오지 못했습니다: "+S.effErr));
+    es.appendChild(retryBtn(loadEff));
+  }
   else if(!S.eff) es.appendChild(el("div","hint","불러오는 중…"));
   else if(!S.eff.length) es.appendChild(el("div","hint","적용되는 규칙 파일이 없습니다."));
   else{
@@ -928,7 +961,7 @@ async function loadScan(){
   if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
-  var seq = ++S.sseq;               // 스캔 세대는 뷰 전환(S.seq)과 무관
+  var prevSseq = S.sseq, seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관
   S.loading = true; S.msg = null;
   renderInspector();
   clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
@@ -940,12 +973,13 @@ async function loadScan(){
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
   if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
+    S.sseq = prevSseq;   // 실패 = 이전 스캔 유지. 세대를 되돌려 진행 중이던 파일·규칙 응답을 살린다
     renderInspector();
     if(S.scan) renderTree();
     var q = panel(), qp = el("div","pad");
     q.appendChild(qp);
     qp.appendChild(el("p","err","스캔에 실패했습니다: "+err));
-    var b = el("button",null,"다시 시도"); b.className = "linkbtn"; b.onclick = loadScan; qp.appendChild(b);
+    qp.appendChild(retryBtn(loadScan));
     return;
   }
   S.scan = scan;
@@ -953,7 +987,7 @@ async function loadScan(){
   S.seq++;   // 이전 스캔 기준으로 날아간 패널 요청 무효화
   // 이전 선택 복원
   S.project = null; S.file = null; S.fileErr = null; S.filePath = null;
-  S.eff = null; S.effErr = null; S.effProj = null; S.eseq++;
+  S.eff = null; S.effErr = null; S.eseq++;
   S.tabs = S.tabs.filter(function(t){ return !!S.meta[t.path]; });
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
