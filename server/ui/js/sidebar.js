@@ -280,7 +280,8 @@ function projectNode(parent, p){
     name: p.name || p.path, key:id, ariaCurrent:sel,
     title: p.path + (notes.length ? " · " + notes.join(" · ") : ""),
     warn: warn, tag: gone ? "경로 없음" : null, count: (gone ? null : cnt),
-    onclick: function(){ selectProject(p); }});
+    // 이름 클릭 = 선택 + 접혀 있고 하위 항목이 있으면 바로 펼침 (닫기는 화살표로만)
+    onclick: function(){ if(!gone && !open && cnt > 0) S.expanded[id] = true; selectProject(p); }});
   if(gone || !open) return;
   (d.claude_md||[]).forEach(function(f){
     if(!hitFile(f, nameHit)) return;

@@ -276,6 +276,9 @@ function renderEdit(p){
   var wrap = el("div","edit");
   var bar = el("div","tbar");
   var bV = tbtn("검증", doValidate), bS = tbtn("저장", doSave), bC = tbtn("취소", cancelEdit);
+  bV.title = "저장하지 않고 규칙 검사만 — JSON 문법, frontmatter name/description, 훅 스크립트·@import·링크 경로 실존, * 매처 중복. error는 저장 차단, warn은 안내";
+  bS.title = "검증 후 저장 (백업 생성). error가 있으면 저장되지 않음";
+  bC.title = "편집 취소 (수정 내용 버림)";
   bar.appendChild(bV); bar.appendChild(bS); bar.appendChild(bC);
   var st = el("span","hint", e.dirty ? "수정됨" : "변경 없음");
   bar.appendChild(st);
