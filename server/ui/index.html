@@ -90,10 +90,12 @@ var SCOPE_KO = {global:"전역",
   "global-rules":"전역 rules", project:"프로젝트", "project-local":"프로젝트 로컬",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
 var COVER_KO = {home:"홈 디렉터리", "drive-root":"드라이브 루트", ancestor:"상위 폴더 중복"};
-// seq: 비동기 응답 세대 가드. dead: 서버 종료 후 렌더 중단
-var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, msg:null, seq:0, fseq:0, dead:false};
+// seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관). dead: 서버 종료 후 렌더 중단
+var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, msg:null,
+         seq:0, fseq:0, sseq:0, loading:false, dead:false};
 function stale(seq){ return S.dead || seq !== S.seq; }
 // 개발용 훅: #sample 이면 로컬 샘플 JSON을 스캔 응답 대신 사용
+// 개발용 — 정적 서버에서 scan-sample.json 로드
 var SAMPLE = location.hash === "#sample";
 
 function el(tag, cls, text){var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
@@ -143,7 +145,8 @@ function renderTop(){
   }
   if(S.msg) t.appendChild(el("span","err", S.msg));
   t.appendChild(el("span","spacer"));
-  var re = el("button","btn","재스캔"); re.onclick = loadScan; t.appendChild(re);
+  var re = el("button","btn", S.loading ? "스캔 중…" : "재스캔");
+  re.disabled = S.loading; re.onclick = loadScan; t.appendChild(re);
   var sd = el("button","btn","종료"); sd.onclick = shutdown; t.appendChild(sd);
 }
 function renderErrors(){
@@ -316,8 +319,16 @@ function mergedSetting(key){
 }
 function skillOverrides(){ return mergedSetting("skillOverrides"); }
 function enabledPlugins(){ return mergedSetting("enabledPlugins"); }
-// skillOverrides 키 = 스킬 디렉터리명/커맨드 파일명 (확장자 제외)
-function itemName(f){ return f.name_meta || String(f.name || "").replace(/\.md$/,""); }
+// skillOverrides 키: 스킬은 SKILL.md면 부모 디렉터리명, 아니면 파일명(확장자 제외).
+// 커맨드는 파일명에서 확장자(.md/.toml 등) 제거. 에이전트는 오버라이드 대상 아님.
+function overrideKey(f, kind){
+  var name = String(f.name || "");
+  if(kind === "skill" && name === "SKILL.md"){
+    var seg = String(f.path || "").split(/[\\/]/);
+    return seg[seg.length-2] || name;
+  }
+  return name.replace(/\.[^.\\/]+$/,"");
+}
 function pluginOff(pl){ return enabledPlugins()[pl.key] === false; }
 
 /* ---------- 탭 ---------- */
@@ -327,6 +338,7 @@ function renderTabs(){
     var b = el("button", null, t[1]);
     b.setAttribute("role","tab");
     b.setAttribute("aria-selected", String(S.tab === t[0]));
+    b.setAttribute("aria-controls","panel");
     b.id = "tab-"+t[0];
     b.onclick = function(){ setTab(t[0]); };
     bar.appendChild(b);
@@ -435,10 +447,10 @@ function collect(){
   function push(arr, kind, scope, origin, extra){
     (arr||[]).forEach(function(f){
       if(kind === "skill" && !isSkillFile(f)) return;
-      var nm = itemName(f);
-      out.push({name:nm, kind:kind, origin:origin, rank:rankOf(kind, scope),
+      var key = overrideKey(f, kind);
+      out.push({name:f.name_meta || key, kind:kind, origin:origin, rank:rankOf(kind, scope),
                 desc:f.description, path:f.path,
-                off: extra ? extra.off : ov[nm] === "off",
+                off: extra ? extra.off : (kind !== "agent" && ov[key] === "off"),
                 offLabel: extra ? extra.offLabel : "이 프로젝트에서 OFF"});
     });
   }
@@ -543,9 +555,21 @@ function renderMcp(){
     if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
     names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
   });
+  // 프로젝트 루트 .mcp.json — 선택 프로젝트가 있으면 그 프로젝트만
+  var projs = (S.project && S.project.exists !== false) ? [S.project] : ((S.scan && S.scan.projects) || []);
+  projs.forEach(function(p){
+    var mj = p.mcp_json;
+    if(!mj || !mj.data || typeof mj.data !== "object") return;
+    var srv = mj.data.mcpServers || {}, names = Object.keys(srv);
+    if(!names.length) return;
+    var key = "pmcp:"+(mj.path || p.path || "");
+    if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
+    names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
+  });
   if(!order.length){ p.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
   order.forEach(function(s){
     p.appendChild(el("h3", null, s === "global" ? "전역"
+      : s.indexOf("pmcp:") === 0 ? "프로젝트 .mcp.json · "+s.slice(5)
       : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
       : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s));
     var tb = el("table");
@@ -593,32 +617,36 @@ function scanPaths(sc){
   return set;
 }
 async function loadScan(){
-  if(S.dead) return;
-  var prevProj = S.project && S.project.path, prevFile = S.file && S.file.path;
-  var seq = ++S.seq;
-  S.scan = null; S.project = null; S.file = null; S.fileErr = null; S.msg = null;
+  if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
+  // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
+  var prevProject = S.project && S.project.path, prevFile = S.file && S.file.path;
+  var seq = ++S.sseq;               // 스캔 세대는 탭 전환(S.seq)과 무관
+  S.loading = true; S.msg = null;
   renderTop();
   clear(document.getElementById("tree")).appendChild(el("p","hint","스캔 중…"));
-  var p = panel();
-  p.appendChild(el("p","hint","스캔 중…"));
-  var scan;
+  panel().appendChild(el("p","hint","스캔 중…"));
+  var scan = null, err = null;
   try{
     scan = await getJSON(SAMPLE ? "./scan-sample.json" : "/api/scan");
-  }catch(e){
-    if(stale(seq)) return;
+  }catch(e){ err = e.message; }
+  S.loading = false;
+  if(S.dead || seq !== S.sseq) return;
+  if(err){
+    renderTop();
     clear(document.getElementById("tree"));
     var q = panel();
-    q.appendChild(el("p","err","스캔에 실패했습니다: "+e.message));
+    q.appendChild(el("p","err","스캔에 실패했습니다: "+err));
     var b = el("button","btn","다시 시도"); b.onclick = loadScan; q.appendChild(b);
     return;
   }
-  if(stale(seq)) return;
   S.scan = scan;
+  S.seq++;   // 이전 스캔 기준으로 날아간 패널 요청 무효화
   // 이전 선택 복원
-  if(prevProj){
-    var found = (scan.projects||[]).filter(function(x){ return x.path === prevProj; })[0];
+  S.project = null; S.file = null; S.fileErr = null;
+  if(prevProject){
+    var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
-    else S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProj;
+    else S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject;
   }
   if(prevFile && !scanPaths(scan)[prevFile]){
     S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
