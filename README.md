@@ -10,6 +10,8 @@ Claude Code configuration lives in many places — the global `~/.claude/CLAUDE.
 - Local only. It binds to `127.0.0.1` only and rejects requests from outside the browser (Origin mismatch).
 - Read-first. It writes only the files you explicitly save or toggle in the UI, and always makes a backup first.
 
+![Overview: explorer, editor and inspector](docs/img/01-files.png)
+
 ---
 
 ## Contents
@@ -100,6 +102,8 @@ While editing (unsaved changes), quitting and rescanning ask for confirmation.
 
 ## Layout
 
+![Files view with the web-shop project selected](docs/img/01-files.png)
+
 ```
 ┌────┬──────────────┬──────────────────────────────┬──────────────┐
 │ Ac │ Sidebar      │ Editor                       │ Inspector    │
@@ -144,6 +148,8 @@ Pick a project in the Files sidebar and this shows **the CLAUDE.md-family files 
 - The context row lets you switch projects directly.
 - Type a title into the toolbar search box and press Enter (or the `⇄ compare` chip) to open a **cross-project compare tab**. See [Sections](#sections-claudemd-structure) below.
 
+![Rules view: effective CLAUDE.md chain with section rows and a conflict badge](docs/img/02-rules.png)
+
 ### Skills, agents, commands
 
 Groups for global · this project · each plugin. A row is a name + a kind tag (`skill` / `agent` / `command`) + an ON/OFF switch.
@@ -152,12 +158,16 @@ Groups for global · this project · each plugin. A row is a name + a kind tag (
 - The switch to the right of a plugin group header is a **per-plugin** ON/OFF.
 - The context row shows which file the toggle saves to.
 
+![Skills view with ON/OFF switches and the inspector level select](docs/img/03-skills.png)
+
 ### Hooks
 
 The hooks in `settings*.json`, grouped **in session event order** (SessionStart → … → Stop). A row shows the matcher name (`(all)` when there is none), the file name of the first command (mono), and the command count. If it fires twice together with a `*` matcher, `⚠ duplicate`. The color stripe is the origin (global / project / plugin).
 
 - Toolbar: `Search event, matcher, command`, plus three origin chips (all ON by default).
 - Clicking a row opens the origin `settings.json` in the editor and shows hook details in the inspector. Plugin-origin hooks have no file to open.
+
+![Hooks view grouped by session event with a duplicate-matcher warning](docs/img/04-hooks.png)
 
 ### MCP
 
@@ -166,6 +176,8 @@ Grouped by origin (global `settings.json` / project `.mcp.json` / plugin). A row
 - Toolbar: `Search server name`, plus `command` / `url` chips (both off = all).
 - Clicking opens the source file and shows only that server's config JSON in the inspector.
 
+![MCP view grouped by source](docs/img/05-mcp.png)
+
 ## Editor
 
 - **Tabs** — the last 6. When several tabs share a name and origin (`SKILL.md` and friends), they are shown as `folder/SKILL.md`. Tabs for files that disappeared after a rescan are closed.
@@ -173,6 +185,8 @@ Grouped by origin (global `settings.json` / project `.mcp.json` / plugin). A row
 - **Source view** — line numbers plus body. A fold toggle sits in the line-number column of heading lines. Everything past line 2,000 is shown as one block.
 - **Edit mode** — a `Validate` `Save` `Cancel` toolbar (each with a tooltip), the edit-assistant prompt box, a textarea, and the validation result list. `Ctrl+S` saves. For team-shared files there is a "committing this applies it to the whole team" warning row. Closing the tab or the browser with unsaved changes asks for confirmation.
 - **Compare tab** — a `Compare: <title>` virtual tab. Read-only. Click a card header to jump to that line in that file.
+
+![Edit mode: Validate / Save / Cancel toolbar, edit-assistant prompt and team-shared warning](docs/img/06-edit.png)
 
 ## Inspector and status bar
 
@@ -233,6 +247,8 @@ Files are sliced by markdown headings (`#`–`######`). A `#` inside a fenced co
 - **Editing one section** — `Edit this section` appears when you hover a heading line. Only that section's lines go into the textarea, and saving swaps just that line range, so the remaining lines stay byte-identical. Validation runs against the synthesized whole document. If the disk changed mid-save (V7), the file is re-read, the range is found again by the same title, and if it cannot be found the editor falls back to whole-file editing.
 - **Conflicts (V5)** — `⚠ conflict` on a section row in the Rules sidebar, and the inspector's `Conflicts` section expands each file's body side by side.
 - **Cross-project compare** — sections whose titles match **exactly** are collected from the global config and every project into a compare tab.
+
+![Compare tab: the same heading across global and project files](docs/img/07-compare.png)
 
 ### Toggles (skills and plugins ON/OFF)
 
