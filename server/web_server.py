@@ -1,4 +1,4 @@
-"""config-map 로컬 HTTP 서버 (F6). 읽기 전용 — 상태 파일 하나만 쓴다."""
+"""config-map 로컬 HTTP 서버 (F6). 쓰기는 상태 파일과 /api/save 뿐이다."""
 
 import sys
 
@@ -25,7 +25,8 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
+MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
 UI = Path(__file__).resolve().parent / "ui" / "index.html"
@@ -37,6 +38,7 @@ log = logging.getLogger("config-map.web")
 _LOCK = threading.Lock()
 _scan: dict | None = None
 _allowed: set = set()
+_readonly: set = set()
 
 
 def state_path() -> Path:
@@ -70,9 +72,21 @@ def _allowed_paths(scan: dict) -> set:
         add_all(p, "claude_md", "rules", "skills", "agents", "commands")
         for e in (p.get("settings") or {}).values():
             add(e)
+    out |= _readonly_paths(scan)
+    return out
+
+
+def _readonly_paths(scan: dict) -> set:
+    """플러그인 소속 파일. 읽기는 되지만 저장은 막는다 (PRD §9-2)."""
+    out = set()
     for pl in scan.get("plugins") or []:
-        add(pl.get("manifest"))
-        add_all(pl, "skills", "commands")
+        m = pl.get("manifest")
+        if isinstance(m, dict) and m.get("path"):
+            out.add(m["path"])
+        for k in ("skills", "commands"):
+            for e in pl.get(k) or []:
+                if isinstance(e, dict) and e.get("path"):
+                    out.add(e["path"])
     return out
 
 
@@ -130,14 +144,74 @@ class Handler(BaseHTTPRequestHandler):
         self._err(404, "not found")
 
     def _post(self):
-        if urlparse(self.path).path == "/api/shutdown":
-            origin = self.headers.get("Origin")
-            if origin and origin not in self._own_origins():
-                return self._err(403, "forbidden origin")
+        origin = self.headers.get("Origin")
+        if origin and origin not in self._own_origins():
+            return self._err(403, "forbidden origin")
+        path = urlparse(self.path).path
+        if path == "/api/shutdown":
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
+        if path in ("/api/validate", "/api/save"):
+            body = self._body()
+            if body is None:
+                return
+            return self._validate(body) if path == "/api/validate" else self._save(body)
         self._err(404, "not found")
+
+    def _body(self) -> dict | None:
+        """JSON 본문 → dict. 상한 초과·파싱 실패면 응답까지 보내고 None."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            n = -1
+        if n < 0:
+            self._err(400, "invalid body")
+            return None
+        if n > MAX_BODY:
+            # ponytail: 응답 전에 본문을 버려 읽는다. 안 읽으면 클라이언트가 413 대신
+            # 연결 끊김을 본다. 32 MiB까지만 흘려보내고 그 위는 그냥 끊는다.
+            remaining = min(n, 32 << 20)
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 1 << 16))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            self._err(413, "body too large")
+            return None
+        try:
+            body = json.loads(self.rfile.read(n).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            self._err(400, "invalid json")
+            return None
+        if not isinstance(body, dict):
+            self._err(400, "invalid json")
+            return None
+        return body
+
+    def _target(self, raw) -> str | None:
+        """쓰기·검증 대상 경로 검사. 실패면 응답까지 보내고 None."""
+        if not isinstance(raw, str) or not raw:
+            self._err(400, "path required")
+            return None
+        with _LOCK:
+            scanned = _scan is not None
+            allowed, readonly = _allowed, _readonly
+        if not scanned:
+            self._err(409, "scan first")
+            return None
+        try:
+            path = _norm(raw)
+        except (OSError, ValueError):
+            self._err(404, "not in scan result")
+            return None
+        if path not in allowed:
+            self._err(404, "not in scan result")
+            return None
+        if path in readonly:
+            self._err(403, "plugin files are read-only")
+            return None
+        return path
 
     def _own_origins(self) -> set:
         host, port = self.server.server_address[:2]
@@ -156,9 +230,10 @@ class Handler(BaseHTTPRequestHandler):
     def _scan(self):
         result = core.scan()
         with _LOCK:
-            global _scan, _allowed
+            global _scan, _allowed, _readonly
             _scan = result
             _allowed = _allowed_paths(result)
+            _readonly = _readonly_paths(result)
         self._json(200, result)
 
     # ponytail: resolve와 open 사이 심링크 교체는 방어하지 않음 — 127.0.0.1 전용·본인 파일 읽기 도구. 필요 시 os.open(O_NOFOLLOW)+fstat 비교로 교체
@@ -182,6 +257,36 @@ class Handler(BaseHTTPRequestHandler):
         if "error" in meta:
             return self._err(500, meta["error"])
         self._json(200, {"path": path, **meta})
+
+    def _validate(self, body: dict):
+        text = body.get("text")
+        if not isinstance(text, str):
+            return self._err(400, "text required")
+        path = self._target(body.get("path"))
+        if path is None:
+            return
+        self._json(200, {"issues": core.validate(path, text)})
+
+    def _save(self, body: dict):
+        text, mtime = body.get("text"), body.get("mtime")
+        if not isinstance(text, str) or isinstance(mtime, bool)                 or not isinstance(mtime, (int, float)):
+            return self._err(400, "text and mtime required")
+        path = self._target(body.get("path"))
+        if path is None:
+            return
+        try:
+            r = core.save(path, text, mtime)
+        except FileNotFoundError:
+            return self._err(404, "not found")
+        except OSError as e:
+            log.warning("save failed %s: %s", path, e)
+            return self._err(500, "save failed")
+        if r.get("conflict"):
+            return self._json(409, {"error": "modified on disk", "mtime": r["mtime"]})
+        if any(i["level"] == "error" for i in r["issues"]):
+            return self._json(422, {"error": "validation failed", "issues": r["issues"]})
+        self._json(200, {"path": path, "mtime": r["mtime"], "size": r["size"],
+                         "backup": r["backup"], "issues": r["issues"]})
 
     def _effective(self, raw: str):
         if not raw:

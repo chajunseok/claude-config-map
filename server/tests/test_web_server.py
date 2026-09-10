@@ -88,6 +88,7 @@ class ServerCase(unittest.TestCase):
 
         web_server._scan = None
         web_server._allowed = set()
+        web_server._readonly = set()
         self.addCleanup(setattr, web_server, "_scan", None)
 
         self.httpd = web_server.bind("127.0.0.1", 0)
@@ -328,6 +329,151 @@ class TestEndpoints(ServerCase):
         sf.write_text(json.dumps({"port": 1, "pid": 1,
                                   "url": "http://127.0.0.1:1"}), encoding="utf-8")
         self.assertIsNone(web_server.live_url())
+
+
+class TestEditEndpoints(ServerCase):
+    """POST /api/validate · /api/save 상태 코드 매트릭스."""
+
+    def post(self, path, obj=None, headers=None, raw=None):
+        data = raw if raw is not None else json.dumps(obj).encode("utf-8")
+        req = urllib.request.Request(
+            self.url + path, data=data, method="POST",
+            headers={"Content-Type": "application/json", **(headers or {})})
+        return get(req)
+
+    def file_mtime(self, f):
+        code, body, _ = get(self.url + "/api/file?path=" + f.as_posix())
+        self.assertEqual(code, 200)
+        return json.loads(body)["mtime"]
+
+    def test_validate_before_scan_is_409(self):
+        code, body, _ = self.post("/api/validate",
+                                  {"path": self.allowed.as_posix(), "text": "x\n"})
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_save_before_scan_is_409(self):
+        code, body, _ = self.post("/api/save", {"path": self.allowed.as_posix(),
+                                                "text": "x\n", "mtime": 1.0})
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_validate_ok_and_issues(self):
+        self.scan()
+        code, body, _ = self.post("/api/validate",
+                                  {"path": self.allowed.as_posix(), "text": "# ok\n"})
+        self.assertEqual(code, 200)
+        self.assertEqual(json.loads(body)["issues"], [])
+
+        code, body, _ = self.post("/api/validate",
+                                  {"path": self.settings_file.as_posix(), "text": "{bad"})
+        self.assertEqual(code, 200)
+        issues = json.loads(body)["issues"]
+        self.assertEqual(issues[0]["rule"], "V1")
+        self.assertEqual(issues[0]["level"], "error")
+
+    def test_save_writes_and_backs_up(self):
+        self.scan()
+        mtime = self.file_mtime(self.allowed)
+        code, body, _ = self.post("/api/save", {"path": self.allowed.as_posix(),
+                                                "text": "# edited\n", "mtime": mtime})
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["path"], self.allowed.resolve().as_posix())
+        self.assertEqual(d["issues"], [])
+        self.assertEqual(self.allowed.read_bytes(), b"# edited\n")
+        backup = Path(d["backup"])
+        self.assertEqual(backup.read_bytes(), b"# project rules\n")
+        self.assertTrue(backup.is_relative_to(self.home / ".claude" / "config-map"))
+        self.assertEqual(d["size"], self.allowed.stat().st_size)
+
+    def test_save_conflict_is_409_and_keeps_file(self):
+        self.scan()
+        code, body, _ = self.post("/api/save", {"path": self.allowed.as_posix(),
+                                                "text": "# edited\n", "mtime": 1.0})
+        self.assertEqual(code, 409)
+        d = json.loads(body)
+        self.assertEqual(d["error"], "modified on disk")
+        self.assertAlmostEqual(d["mtime"], self.allowed.stat().st_mtime)
+        self.assertEqual(self.allowed.read_bytes(), b"# project rules\n")
+
+    def test_save_validation_failure_is_422_and_keeps_file(self):
+        self.scan()
+        mtime = self.file_mtime(self.settings_file)
+        code, body, _ = self.post("/api/save", {"path": self.settings_file.as_posix(),
+                                                "text": "{bad", "mtime": mtime})
+        self.assertEqual(code, 422)
+        d = json.loads(body)
+        self.assertEqual(d["error"], "validation failed")
+        self.assertEqual(d["issues"][0]["rule"], "V1")
+        self.assertEqual(self.settings_file.read_text(encoding="utf-8"), "{}\n")
+
+    def test_plugin_files_are_read_only(self):
+        self.scan()
+        for f in (self.manifest_file, self.plugin_skill):
+            code, body, _ = self.post("/api/save", {"path": f.as_posix(),
+                                                    "text": "x\n", "mtime": 1.0})
+            self.assertEqual(code, 403, f)
+            self.assertEqual(json.loads(body)["error"], "plugin files are read-only")
+
+            code, body, _ = self.post("/api/validate", {"path": f.as_posix(),
+                                                        "text": "x\n"})
+            self.assertEqual(code, 403, f)
+
+    def test_outside_scan_is_404(self):
+        self.scan()
+        code, body, _ = self.post("/api/save", {"path": self.outside.as_posix(),
+                                                "text": "x\n", "mtime": 1.0})
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not in scan result")
+
+    def test_missing_file_on_disk_is_404(self):
+        self.scan()
+        mtime = self.file_mtime(self.allowed)
+        self.allowed.unlink()
+        code, body, _ = self.post("/api/save", {"path": self.allowed.as_posix(),
+                                                "text": "x\n", "mtime": mtime})
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not found")
+
+    def test_foreign_origin_is_403(self):
+        self.scan()
+        for path in ("/api/validate", "/api/save"):
+            code, body, _ = self.post(path, {"path": self.allowed.as_posix(),
+                                             "text": "x\n", "mtime": 1.0},
+                                      headers={"Origin": "http://evil.example"})
+            self.assertEqual(code, 403, path)
+            self.assertEqual(json.loads(body)["error"], "forbidden origin")
+        self.assertEqual(self.allowed.read_bytes(), b"# project rules\n")
+
+    def test_bad_json_and_missing_fields_are_400(self):
+        self.scan()
+        code, body, _ = self.post("/api/save", raw=b"{not json")
+        self.assertEqual(code, 400)
+        self.assertEqual(json.loads(body)["error"], "invalid json")
+
+        code, _, _ = self.post("/api/save", {"path": self.allowed.as_posix()})
+        self.assertEqual(code, 400)
+        code, _, _ = self.post("/api/validate", {"path": self.allowed.as_posix()})
+        self.assertEqual(code, 400)
+        code, _, _ = self.post("/api/validate", {"text": "x\n"})
+        self.assertEqual(code, 400)
+
+    def test_body_over_limit_is_413(self):
+        self.scan()
+        big = json.dumps({"path": self.allowed.as_posix(),
+                          "text": "x" * (web_server.MAX_BODY + 1),
+                          "mtime": 1.0}).encode("utf-8")
+        self.assertGreater(len(big), web_server.MAX_BODY)
+        code, body, _ = self.post("/api/save", raw=big)
+        self.assertEqual(code, 413)
+        self.assertEqual(json.loads(body)["error"], "body too large")
+        self.assertEqual(self.allowed.read_bytes(), b"# project rules\n")
+
+    def test_unknown_post_path_is_404(self):
+        code, body, _ = self.post("/api/nope", {})
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not found")
 
 
 class TestVersionGuard(unittest.TestCase):

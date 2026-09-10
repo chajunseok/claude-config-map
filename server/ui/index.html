@@ -137,6 +137,27 @@ h3{font-size:13px;margin:14px 0 6px}
 #errlist{margin-top:6px;display:flex;flex-direction:column;gap:4px}
 #errlist div{color:var(--err);word-break:break-all;font-size:11px}
 
+/* ---- 편집 모드 ---- */
+.tbar{position:sticky;top:0;z-index:1;flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+      padding:6px 10px;background:var(--bar);border-bottom:1px solid var(--bd)}
+.tbar button{border:1px solid var(--bd);border-radius:4px;padding:3px 10px;color:var(--fg)}
+.tbar button:hover{background:var(--hover)}
+.tbar button[disabled]{color:var(--muted);cursor:default}
+.tbar .hint{font-size:11px}
+.edit{display:flex;flex-direction:column;height:100%;min-height:0}
+.sharewarn{flex:none;padding:5px 10px;color:var(--warn);background:var(--bg);border-bottom:1px solid var(--bd)}
+.edmsg{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:5px 10px;border-bottom:1px solid var(--bd)}
+.edmsg.ok{color:var(--green)}
+.edmsg.bad{color:var(--err)}
+textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none;padding:8px 10px;
+            font:12px/1.7 var(--mono);color:var(--fg);background:var(--ed)}
+.issues{flex:none;max-height:34%;overflow:auto;border-top:1px solid var(--bd);
+        padding:6px 10px;display:flex;flex-direction:column;gap:3px}
+.iss{font-size:12px;word-break:break-all}
+.iss.error{color:var(--err)}
+.iss.warnlv{color:var(--warn)}
+.iss .rl{font:11px/1.5 var(--mono);color:var(--muted);margin-right:6px}
+
 @media (max-width:900px){
   #app{grid-template-columns:48px 200px 1fr;grid-template-rows:1fr auto}
   #activity{grid-row:1/3}
@@ -177,10 +198,12 @@ var MAX_TABS = 6;
 var MAX_LINE_ROWS = 2000;
 // seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관), fseq: 파일 세대, eseq: 유효 규칙 세대
 // dead: 서버 종료 후 렌더 중단
-var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null,
+var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null, msgOk:false,
          seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
          tabs:[], meta:Object.create(null), expanded:Object.create(null),
-         eff:null, effErr:null, errOpen:false};
+         eff:null, effErr:null, errOpen:false,
+         // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls}
+         edit:null, issues:null};
 function stale(seq){ return S.dead || seq !== S.seq; }
 function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
@@ -211,6 +234,14 @@ async function getJSON(url){
   if(b==null) throw new Error("응답을 읽지 못했습니다");
   return b;
 }
+// 편집용 POST: 상태코드로 분기해야 하므로 throw 하지 않고 {status, ok, body} 를 준다
+async function postJSON(url, body){
+  var r = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"},
+                            body: JSON.stringify(body)}), b = null;
+  try{ b = await r.json(); }catch(e){}
+  return {status:r.status, ok:r.ok, body:b || {}};
+}
+function resErr(res){ return (res.body && res.body.error) || ("HTTP "+res.status); }
 
 /* ---------- 설정 조회 헬퍼 ---------- */
 function settingsData(obj){
@@ -333,6 +364,7 @@ function renderActivity(){
   document.getElementById("panel").setAttribute("aria-labelledby","tab-"+S.tab);
 }
 function setTab(name){
+  if(name !== "raw" && !guardEdit()) return;   // 원문 뷰 안에서의 전환은 편집을 건드리지 않는다
   S.seq++;  // 뷰 전환 = 이전 요청 무효
   S.tab = name;
   renderActivity();
@@ -510,6 +542,7 @@ function pluginNode(parent, pl){
   listNode(parent, 2, id+".commands", "commands", pl.commands);
 }
 function selectProject(p){
+  if(!guardEdit()) return;
   S.project = p;
   renderTree();
   loadEff();
@@ -527,6 +560,7 @@ function addTab(path){
   if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
 }
 function closeTab(path){
+  if(S.edit && S.edit.path === path && !guardEdit()) return;
   var i = S.tabs.findIndex(function(x){ return x.path === path; });
   if(i < 0) return;
   S.tabs.splice(i, 1);
@@ -534,7 +568,7 @@ function closeTab(path){
   var next = S.tabs[i] || S.tabs[i-1];
   if(next){ openFile(next.path); return; }
   S.fseq++;    // 진행 중 파일 응답 무효
-  S.file = null; S.fileErr = null; S.filePath = null;
+  S.file = null; S.fileErr = null; S.filePath = null; S.issues = null;
   renderTree(); renderTabstrip(); renderInspector();
   if(S.tab === "raw") renderRaw();
 }
@@ -609,8 +643,9 @@ function syncProject(path){
   loadEff();   // 트리·인스펙터 렌더는 openFile 이 이어서 수행
 }
 async function openFile(path, keepTab){
+  if(!guardEdit()) return;
   syncProject(path);
-  S.file = null; S.fileErr = null; S.filePath = path;
+  S.file = null; S.fileErr = null; S.filePath = path; S.issues = null;
   addTab(path);
   renderTree();
   if(!keepTab) setTab("raw"); else renderTabstrip();
@@ -631,12 +666,15 @@ async function openFile(path, keepTab){
 }
 function renderRaw(){
   var p = panel();
+  if(S.edit && S.edit.path === S.filePath) return renderEdit(p);
   if(S.fileErr){ p.appendChild(el("div","pad")).appendChild(el("p","err", S.fileErr)); return; }
   if(!S.file){
     p.appendChild(el("div","pad")).appendChild(
       el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
     return;
   }
+  p.appendChild(readBar());
+  if(S.issues && S.issues.length) p.appendChild(issueList(S.issues));
   var lines = (S.file.text || "").split("\n");
   var box = el("div","code");
   // ponytail: 2000줄까지만 줄 단위 행, 나머지는 pre 한 덩어리 (행이 많으면 렌더가 느려짐)
@@ -649,6 +687,195 @@ function renderRaw(){
   }
   if(lines.length > n) box.appendChild(el("pre","rest", lines.slice(n).join("\n")));
   p.appendChild(box);
+}
+
+/* 1-1. 편집 모드 (F3·F4·F5) */
+// ponytail: 줄번호·구문강조·diff 없음. textarea 하나 + 검증/저장 버튼.
+var ED = null;   // 현재 그려진 편집 DOM 참조 {path, ta, msg, issues, btns}
+function isPluginFile(path){
+  var m = S.meta[path] || {};
+  return String(m.origin || "").indexOf("플러그인 ") === 0;
+}
+function tbtn(text, fn){ var b = el("button", null, text); b.onclick = fn; return b; }
+// 원문(읽기) 뷰 툴바 — 편집 진입 또는 읽기 전용 안내
+function readBar(){
+  var bar = el("div","tbar");
+  if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint","읽기 전용 (플러그인)"));
+  else bar.appendChild(tbtn("편집", startEdit));
+  var m = S.meta[S.filePath] || {};
+  if(m.shared) bar.appendChild(el("span","hint","팀 공유 (git 추적)"));
+  return bar;
+}
+function issueList(issues){
+  var box = el("div","issues");
+  if(!issues.length){ box.appendChild(el("div","hint","문제 없음")); return box; }
+  issues.forEach(function(it){
+    var lv = it.level === "error" ? "error" : "warnlv";
+    var d = el("div","iss "+lv);
+    d.appendChild(el("span","rl", (it.rule || "?") + (it.line != null ? " · "+it.line+"행" : "")));
+    d.appendChild(document.createTextNode(it.message || ""));
+    box.appendChild(d);
+  });
+  return box;
+}
+function startEdit(){
+  if(!S.file || !S.filePath || isPluginFile(S.filePath)) return;
+  S.edit = {path:S.filePath, text:S.file.text || "", dirty:false,
+            issues:null, busy:false, conflict:false, msg:null, msgCls:""};
+  S.issues = null;
+  renderRaw();
+  if(ED && ED.ta) ED.ta.focus();
+}
+// 편집을 버려도 되는지 — 버려도 되면 편집 상태를 지우고 true
+function guardEdit(){
+  if(!S.edit) return true;
+  if(S.edit.dirty && !confirm("저장하지 않은 변경이 있습니다. 버릴까요?")) return false;
+  S.edit = null; ED = null;
+  return true;
+}
+function cancelEdit(){
+  if(!guardEdit()) return;
+  renderRaw();
+  renderInspector();
+}
+function renderEdit(p){
+  var e = S.edit, m = S.meta[e.path] || {};
+  var wrap = el("div","edit");
+  var bar = el("div","tbar");
+  var bV = tbtn("검증", doValidate), bS = tbtn("저장", doSave), bC = tbtn("취소", cancelEdit);
+  bar.appendChild(bV); bar.appendChild(bS); bar.appendChild(bC);
+  var st = el("span","hint", e.dirty ? "수정됨" : "변경 없음");
+  bar.appendChild(st);
+  wrap.appendChild(bar);
+  if(m.shared) wrap.appendChild(el("div","sharewarn","git 추적 파일 — 커밋하면 팀 전체에 적용됨"));
+  var msg = el("div","edmsg");
+  wrap.appendChild(msg);
+  var ta = el("textarea","ta");
+  ta.value = e.text;
+  ta.spellcheck = false;
+  ta.setAttribute("aria-label", e.path + " 편집");
+  ta.oninput = function(){
+    if(!S.edit) return;
+    S.edit.text = ta.value; S.edit.dirty = true;
+    st.textContent = "수정됨";
+  };
+  wrap.appendChild(ta);
+  var iss = el("div");
+  wrap.appendChild(iss);
+  p.appendChild(wrap);
+  ED = {path:e.path, ta:ta, msg:msg, issues:iss, btns:[bV,bS,bC]};
+  refreshEdit();
+}
+// 검증/저장 응답만 반영 — textarea 는 다시 만들지 않는다 (커서·스크롤 유지)
+function refreshEdit(){
+  var e = S.edit;
+  if(!e) return;
+  if(!ED || ED.path !== e.path) return renderRaw();
+  ED.btns.forEach(function(b){ b.disabled = !!e.busy; });
+  var msg = clear(ED.msg);
+  msg.className = "edmsg" + (e.msgCls ? " "+e.msgCls : "");
+  if(e.msg) msg.appendChild(el("span", null, e.msg));
+  if(e.conflict){
+    var b = el("button","linkbtn","다시 읽기");
+    b.onclick = reReadFile;
+    msg.appendChild(b);
+  }
+  clear(ED.issues);
+  if(e.issues) ED.issues.appendChild(issueList(e.issues));
+}
+function editBusy(text){
+  S.edit.busy = true; S.edit.msg = text; S.edit.msgCls = "";
+  refreshEdit();
+}
+// 응답 세대 가드: 서버 종료·편집 종료·다른 파일 편집이면 버린다
+function editAlive(path){ return !S.dead && S.edit && S.edit.path === path; }
+async function doValidate(){
+  var e = S.edit;
+  if(!e || e.busy) return;
+  var path = e.path;
+  editBusy("검증 중…");
+  var res = null, err = null;
+  try{ res = await postJSON("/api/validate", {path:path, text:S.edit.text}); }
+  catch(ex){ err = ex.message; }
+  if(!editAlive(path)) return;
+  S.edit.busy = false;
+  if(err || !res.ok){
+    S.edit.issues = null;
+    S.edit.msg = "검증하지 못했습니다: " + (err || resErr(res));
+    S.edit.msgCls = "bad";
+  }else{
+    S.edit.issues = res.body.issues || [];
+    S.edit.msg = null; S.edit.msgCls = "";
+  }
+  refreshEdit();
+}
+async function doSave(){
+  var e = S.edit;
+  if(!e || e.busy) return;
+  if(e.conflict){
+    e.msg = "디스크에서 변경됨 — 다시 읽기 후 저장하세요."; e.msgCls = "bad";
+    refreshEdit();
+    return;
+  }
+  var path = e.path, text = e.text;
+  editBusy("저장 중…");
+  var res = null, err = null;
+  try{ res = await postJSON("/api/save", {path:path, text:text, mtime:(S.file && S.file.mtime)}); }
+  catch(ex){ err = ex.message; }
+  if(!editAlive(path)) return;
+  S.edit.busy = false;
+  if(err){
+    S.edit.msg = "저장하지 못했습니다: " + err; S.edit.msgCls = "bad";
+    return refreshEdit();
+  }
+  var b = res.body;
+  if(res.status === 200){
+    if(S.file && S.filePath === path){
+      S.file.text = text;
+      if(b.mtime != null) S.file.mtime = b.mtime;
+      if(b.size != null) S.file.size = b.size;
+    }
+    S.edit = null; ED = null;
+    S.issues = (b.issues && b.issues.length) ? b.issues : null;   // warn 은 저장 후에도 남긴다
+    S.msg = "저장됨 · 백업 " + (b.backup || "(경로 미상)");
+    S.msgOk = true;
+    renderRaw();
+    renderInspector();
+    return;
+  }
+  if(res.status === 422){
+    S.edit.issues = b.issues || [];
+    S.edit.msg = "검증 오류가 있어 저장하지 않았습니다."; S.edit.msgCls = "bad";
+  }else if(res.status === 409){
+    S.edit.conflict = true;
+    S.edit.msg = "디스크에서 변경됨 — 다시 읽기 후 저장할 수 있습니다.";
+    S.edit.msgCls = "bad";
+  }else{
+    S.edit.msg = "저장하지 못했습니다: " + resErr(res); S.edit.msgCls = "bad";
+  }
+  refreshEdit();
+}
+// 409 복구: 디스크 원문만 다시 받는다 — textarea 편집본은 그대로 (§11.3)
+async function reReadFile(){
+  var e = S.edit;
+  if(!e || e.busy) return;
+  var path = e.path;
+  editBusy("다시 읽는 중…");
+  var file = null, err = null;
+  try{ file = await getJSON("/api/file?path="+encodeURIComponent(path)); }
+  catch(ex){ err = ex.message; }
+  if(!editAlive(path)) return;
+  S.edit.busy = false;
+  if(err){
+    S.edit.msg = "다시 읽지 못했습니다: " + err; S.edit.msgCls = "bad";
+    return refreshEdit();
+  }
+  if(S.filePath === path) S.file = file;
+  S.edit.conflict = false;
+  S.edit.msg = "디스크 내용을 다시 읽었습니다. 편집본은 그대로이며, 저장하면 덮어씁니다.";
+  S.edit.msgCls = "";
+  refreshEdit();
+  renderInspector();
 }
 
 /* 2. 유효 규칙 — 인스펙터 `함께 적용됨`과 같은 데이터를 공유 */
@@ -908,7 +1135,7 @@ function renderInspector(){
     kvRow(g1, "시각", S.loading ? "스캔 중…" : "-");
   }
   sc.appendChild(g1);
-  if(S.msg) sc.appendChild(el("div","err", S.msg));
+  if(S.msg) sc.appendChild(el("div", S.msgOk ? "hint" : "err", S.msg));
   if(S.scanErr) sc.appendChild(retryBtn(loadScan));
   var errs = (S.scan && S.scan.errors) || [];
   if(errs.length){
@@ -1014,6 +1241,7 @@ function renderInspector(){
 }
 async function shutdown(){
   if(S.dead) return;
+  if(!guardEdit()) return;
   var fail = null;
   try{
     var r = await fetch("/api/shutdown",{method:"POST"}), b = null;
@@ -1021,7 +1249,7 @@ async function shutdown(){
     if(!r.ok || !b || b.ok !== true) fail = (b && b.error) || ("HTTP "+r.status);
   }catch(e){ fail = e.message; }
   if(fail){  // 실패면 UI 유지, 인스펙터에만 표시
-    S.msg = "종료하지 못했습니다: "+fail;
+    S.msg = "종료하지 못했습니다: "+fail; S.msgOk = false;
     renderInspector();
     return;
   }
@@ -1035,10 +1263,11 @@ async function shutdown(){
 /* ---------- 부트 ---------- */
 async function loadScan(){
   if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
+  if(!guardEdit()) return;
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
   var seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관 · 실패해도 되돌리지 않는다
-  S.loading = true; S.msg = null; S.scanErr = false;
+  S.loading = true; S.msg = null; S.msgOk = false; S.scanErr = false;
   renderInspector();
   clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
   panel().appendChild(el("div","pad hint","스캔 중…"));
@@ -1049,7 +1278,7 @@ async function loadScan(){
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
   if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
-    S.msg = "스캔에 실패했습니다: "+err; S.scanErr = true;
+    S.msg = "스캔에 실패했습니다: "+err; S.msgOk = false; S.scanErr = true;
     if(S.scan) renderTree();
     // 세대(sseq)는 되돌리지 않는다 — 스캔 중 도착해 폐기된 응답은 지금 다시 요청해 복구
     // 복구 호출을 패널 렌더보다 먼저 — 복구가 패널을 다시 그려도 오류는 인스펙터에 남는다
@@ -1072,7 +1301,7 @@ async function loadScan(){
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
-    else S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject;
+    else { S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject; S.msgOk = false; }
   }
   if(prevFile && !S.meta[prevFile]){
     S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
@@ -1086,6 +1315,16 @@ async function loadScan(){
   renderPanel();
   if(prevFile) openFile(prevFile, true);
 }
+// 편집 중 Ctrl+S = 저장, 브라우저 닫기 = 경고
+document.addEventListener("keydown", function(ev){
+  if(!S.edit || !(ev.ctrlKey || ev.metaKey)) return;
+  if(ev.key !== "s" && ev.key !== "S") return;
+  ev.preventDefault();
+  doSave();
+});
+window.addEventListener("beforeunload", function(ev){
+  if(S.edit && S.edit.dirty){ ev.preventDefault(); ev.returnValue = ""; }
+});
 renderActivity();
 renderTabstrip();
 renderInspector();
