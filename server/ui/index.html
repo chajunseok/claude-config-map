@@ -178,7 +178,7 @@ var MAX_LINE_ROWS = 2000;
 // seq: 패널 응답 세대 가드, sseq: 스캔 세대(탭 전환과 무관), fseq: 파일 세대, eseq: 유효 규칙 세대
 // dead: 서버 종료 후 렌더 중단
 var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:null, msg:null,
-         seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false,
+         seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
          tabs:[], meta:Object.create(null), expanded:Object.create(null),
          eff:null, effErr:null, errOpen:false};
 function stale(seq){ return S.dead || seq !== S.seq; }
@@ -222,10 +222,12 @@ function settingsData(obj){
   return out;
 }
 // 전역 settings.json → 전역 local → 프로젝트 settings.json → 프로젝트 local 순 병합 (뒤가 우선)
-function mergedSetting(key){
+// proj 미지정이면 선택 프로젝트(S.project) 기준
+function mergedSetting(key, proj){
   var res = Object.create(null), sets = [];
+  var pr = (proj === undefined) ? S.project : proj;
   if(S.scan && S.scan.global) sets.push(S.scan.global.settings);
-  if(S.project && S.project.exists !== false) sets.push(S.project.settings);
+  if(pr && pr.exists !== false) sets.push(pr.settings);
   sets.forEach(function(obj){
     var all = settingsData(obj);
     ["settings.json","settings.local.json"].forEach(function(k){
@@ -235,7 +237,7 @@ function mergedSetting(key){
   });
   return res;
 }
-function skillOverrides(){ return mergedSetting("skillOverrides"); }
+function skillOverrides(proj){ return mergedSetting("skillOverrides", proj); }
 function enabledPlugins(){ return mergedSetting("enabledPlugins"); }
 // skillOverrides 키: 스킬은 SKILL.md면 부모 디렉터리명, 아니면 파일명(확장자 제외).
 // 커맨드는 파일명에서 확장자(.md/.toml 등) 제거. 에이전트는 오버라이드 대상 아님.
@@ -258,8 +260,24 @@ function relLabel(path, base){
   if(!b) return null;
   return p.toLowerCase().indexOf(b.toLowerCase()+"/") === 0 ? p.slice(b.length+1) : null;
 }
+// 홈 디렉터리 프로젝트는 ~/.claude 항목을 전역과 같은 경로로 다시 싣는다 — 전역 쪽만 렌더
+var GPATHS = Object.create(null);
+function dedupProj(p){
+  if(p.coverage_reason !== "home") return p;
+  var dup = function(f){ return !!(f && f.path && GPATHS[f.path]); };
+  var q = {};
+  keys(p).forEach(function(k){ q[k] = p[k]; });
+  ["claude_md","rules","skills","agents","commands"].forEach(function(k){
+    if(Array.isArray(p[k])) q[k] = p[k].filter(function(f){ return !dup(f); });
+  });
+  var st = Object.create(null);
+  keys(p.settings).forEach(function(k){ if(!dup(p.settings[k])) st[k] = p.settings[k]; });
+  q.settings = st;
+  return q;
+}
 function scanIndex(sc){
   var set = Object.create(null);
+  GPATHS = Object.create(null);
   function add(f, m){
     if(!f || !f.path || set[f.path]) return;
     var lazy = f.scope === "subdir";
@@ -274,6 +292,9 @@ function scanIndex(sc){
     addAll(o.commands, {scope:prefix+" commands", origin:origin, project:proj});
   }
   var g = sc.global || {};
+  [g.claude_md].concat(g.rules||[], g.skills||[], g.agents||[], g.commands||[],
+    keys(g.settings).map(function(k){ return g.settings[k]; }))
+    .forEach(function(f){ if(f && f.path) GPATHS[f.path] = true; });
   add(g.claude_md, {scope:"전역", origin:"전역"});
   addAll(g.rules, {scope:"전역 rules", origin:"전역"});
   addSettings(g.settings, {scope:"전역 settings", origin:"전역"});
@@ -378,10 +399,10 @@ function emptyRow(parent, depth, label){
   r.appendChild(b);
   parent.appendChild(r);
 }
-function listNode(parent, depth, id, title, arr, kind){
+function listNode(parent, depth, id, title, arr, kind, proj){
   arr = arr || [];
   if(!arr.length) return;
-  var ov = kind ? skillOverrides() : null;
+  var ov = kind ? skillOverrides(proj) : null;
   if(!foldRow(parent, depth, id, false, title, arr.length)) return;
   arr.forEach(function(f){
     var offed = ov && kind !== "agent" && ov[overrideKey(f, kind)] === "off";
@@ -456,7 +477,8 @@ function projectNode(parent, p){
   if(p.coverage === "root-only") notes.push("루트만 · "+(COVER_KO[p.coverage_reason]||p.coverage_reason||"사유 미상"));
   if(p.truncated || p.incomplete) notes.push("일부만 스캔");
   var cls = gone ? "gone" : (notes.length ? "warn b" : "b");
-  var nb = mainBtn(p.name || p.path, gone ? null : projCount(p), cls);
+  var d = dedupProj(p);
+  var nb = mainBtn(p.name || p.path, gone ? null : projCount(d), cls);
   nb.title = p.path + (notes.length ? " · " + notes.join(" · ") : "");
   nb.setAttribute("data-key", id);
   if(sel) nb.setAttribute("aria-current","true");
@@ -464,15 +486,15 @@ function projectNode(parent, p){
   r.appendChild(nb);
   parent.appendChild(r);
   if(gone || !open) return;
-  (p.claude_md||[]).forEach(function(f){
+  (d.claude_md||[]).forEach(function(f){
     var lazy = f.scope === "subdir";
     fileRow(parent, 2, f, lazy ? {cls:"warn", note:"지연 로드"} : null);
   });
-  listNode(parent, 2, id+".rules", "rules", p.rules);
-  settingsNode(parent, 2, id+".settings", p.settings);
-  listNode(parent, 2, id+".skills", "skills", p.skills, "skill");
-  listNode(parent, 2, id+".agents", "agents", p.agents, "agent");
-  listNode(parent, 2, id+".commands", "commands", p.commands, "command");
+  listNode(parent, 2, id+".rules", "rules", d.rules);
+  settingsNode(parent, 2, id+".settings", d.settings);
+  listNode(parent, 2, id+".skills", "skills", d.skills, "skill", p);
+  listNode(parent, 2, id+".agents", "agents", d.agents, "agent", p);
+  listNode(parent, 2, id+".commands", "commands", d.commands, "command", p);
 }
 function pluginNode(parent, pl){
   var id = "l:"+pl.key, gone = pl.exists === false, offed = !gone && pluginOff(pl);
@@ -743,6 +765,9 @@ function renderCards(){
 }
 
 /* 4. 훅 흐름 */
+function hookCmds(h){
+  return Array.isArray(h.commands) ? h.commands : (h.commands ? [h.commands] : []);
+}
 function hookSource(src){
   src = String(src || "");
   if(src.indexOf("global:") === 0) return {cls:"global", label:"전역 · "+src.slice(7)};
@@ -781,7 +806,7 @@ function renderHooks(){
       head.appendChild(badge(src.label));
       if(h.warn === "duplicate-star") head.appendChild(badge("* 매처와 중복 발화","warn"));
       row.appendChild(head);
-      (h.commands || []).forEach(function(c){
+      hookCmds(h).forEach(function(c){
         row.appendChild(el("div","cmd", "→ "+c));
       });
       pad.appendChild(row);
@@ -794,7 +819,7 @@ function renderMcp(){
   var p = panel(), pad = el("div","pad");
   p.appendChild(pad);
   var mcp = (S.scan && S.scan.mcp) || [];
-  var order = [], bySrc = Object.create(null);
+  var order = [], bySrc = Object.create(null), ptitle = Object.create(null);
   mcp.forEach(function(m){
     var s = m.source || "(출처 없음)";
     if(!bySrc[s]){ bySrc[s] = []; order.push(s); }
@@ -805,8 +830,9 @@ function renderMcp(){
     if(pl.exists === false) return;
     var srv = pl.mcp_servers || {}, names = keys(srv);
     if(!names.length) return;
-    var key = "plugin:"+(pl.name || pl.key);
+    var key = "plugin:"+pl.key;
     if(!bySrc[key]){ bySrc[key] = []; order.push(key); }
+    ptitle[key] = "플러그인 · " + (pl.name || pl.key);
     names.forEach(function(n){ bySrc[key].push({name:n, config:srv[n]}); });
   });
   // 프로젝트 루트 .mcp.json — 선택 프로젝트가 있으면 그 프로젝트만
@@ -822,7 +848,8 @@ function renderMcp(){
   });
   if(!order.length){ pad.appendChild(el("p","hint","등록된 MCP 서버가 없습니다.")); return; }
   order.forEach(function(s){
-    pad.appendChild(el("h3", null, s === "global" ? "전역"
+    pad.appendChild(el("h3", null, ptitle[s] ? ptitle[s]
+      : s === "global" ? "전역"
       : s.indexOf("pmcp:") === 0 ? "프로젝트 .mcp.json · "+s.slice(5)
       : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
       : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s));
@@ -882,6 +909,7 @@ function renderInspector(){
   }
   sc.appendChild(g1);
   if(S.msg) sc.appendChild(el("div","err", S.msg));
+  if(S.scanErr) sc.appendChild(retryBtn(loadScan));
   var errs = (S.scan && S.scan.errors) || [];
   if(errs.length){
     var eb = el("button","linkbtn","오류 "+errs.length+"건");
@@ -914,9 +942,13 @@ function renderInspector(){
       kvRow(g2, "본문", "불러오는 중…");
     }
   }
+  if(!S.filePath && S.fileErr){
+    any = true;
+    kvRow(g2, "파일", S.fileErr, "warn");
+  }
   if(S.project){
     any = true;
-    if(S.filePath) g2.appendChild(el("span","k"," ")), g2.appendChild(el("span","v"," "));
+    if(S.filePath || S.fileErr) g2.appendChild(el("span","k"," ")), g2.appendChild(el("span","v"," "));
     var p = S.project;
     kvRow(g2, "프로젝트", p.name || p.path);
     kvRow(g2, "경로", p.path);
@@ -963,7 +995,7 @@ function renderInspector(){
     else{
       var hl = el("div","hooklist");
       mine.forEach(function(h){
-        var line = (h.event||"?") + " · " + (h.matcher || "(없음)") + " → " + ((h.commands||[]).join(", ") || "(명령 없음)");
+        var line = (h.event||"?") + " · " + (h.matcher || "(없음)") + " → " + (hookCmds(h).join(", ") || "(명령 없음)");
         var d = el("div","hookitem", line);
         if(h.warn === "duplicate-star"){
           d.appendChild(el("span","warn", " · * 매처와 중복 발화"));
@@ -1006,7 +1038,7 @@ async function loadScan(){
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
   var seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관 · 실패해도 되돌리지 않는다
-  S.loading = true; S.msg = null;
+  S.loading = true; S.msg = null; S.scanErr = false;
   renderInspector();
   clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
   panel().appendChild(el("div","pad hint","스캔 중…"));
@@ -1017,15 +1049,17 @@ async function loadScan(){
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
   if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
-    renderInspector();
+    S.msg = "스캔에 실패했습니다: "+err; S.scanErr = true;
     if(S.scan) renderTree();
-    var q = panel(), qp = el("div","pad");
-    q.appendChild(qp);
-    qp.appendChild(el("p","err","스캔에 실패했습니다: "+err));
-    qp.appendChild(retryBtn(loadScan));
     // 세대(sseq)는 되돌리지 않는다 — 스캔 중 도착해 폐기된 응답은 지금 다시 요청해 복구
+    // 복구 호출을 패널 렌더보다 먼저 — 복구가 패널을 다시 그려도 오류는 인스펙터에 남는다
     if(S.project && !S.eff && !S.effErr) loadEff();
     if(S.filePath && !S.file && !S.fileErr) openFile(S.filePath, true);
+    renderInspector();
+    var q = panel(), qp = el("div","pad");
+    q.appendChild(qp);
+    qp.appendChild(el("p","err", S.msg));
+    qp.appendChild(retryBtn(loadScan));
     return;
   }
   S.scan = scan;
