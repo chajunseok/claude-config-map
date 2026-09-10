@@ -1139,11 +1139,30 @@ async function doToggle(section, key, value, ctrls){
                                          value:value, target:S.toggleTarget});
   }catch(ex){ err = ex.message; }
   if(S.dead || sseq !== S.sseq) return;
-  if(!err && res.status === 200){ loadScan(); return; }
+  if(!err && res.status === 200){ applyToggle(res.body, section, key); return; }
   S.toggleErr = "토글하지 못했습니다: "
     + (err || ("HTTP " + res.status + " — " + ((res.body && res.body.error) || "요청 실패")));
   renderCardBody();      // 컨트롤 원복 = 현재 스캔 값 기준 재렌더
   renderToggleNotes();
+}
+// 토글 성공 → 재스캔 없이 스캔 상태를 제자리에서 갱신하고 카드·트리·인스펙터만 다시 그린다.
+// ponytail: 서버 응답(path/value/created)이 곧 디스크 상태. 전체 재스캔은 사용자가 재스캔 버튼을 누를 때만.
+function applyToggle(body, section, key){
+  var p = S.project, sets = p.settings || (p.settings = {});
+  var name = S.toggleTarget, entry = sets[name];
+  if(!entry || !entry.data || typeof entry.data !== "object"){
+    entry = sets[name] = {path: body.path, data: {}, mtime: null, size: null, shared: false};
+  }
+  var sec = entry.data[section];
+  if(!sec || typeof sec !== "object") sec = entry.data[section] = {};
+  if(body.value === null || body.value === undefined){
+    delete sec[key];
+    if(!keys(sec).length) delete entry.data[section];
+  }else sec[key] = body.value;
+  if(body.created){ S.meta = scanIndex(S.scan); renderTree(); }
+  if(S.tab === "cards") renderCardBody();
+  renderToggleNotes();
+  renderInspector();
 }
 function renderCards(){
   var p = panel();
