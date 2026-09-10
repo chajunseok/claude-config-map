@@ -28,6 +28,12 @@
 html,body{height:100%}
 body{margin:0;font:13px/1.5 var(--sans);color:var(--fg);background:var(--bg)}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+/* 스크롤바: 토큰으로 통일 — #tree·#panel·#tabstrip·#inspector·.card .desc·textarea.ta 모두 * 로 덮인다 */
+*{scrollbar-width:thin;scrollbar-color:var(--bd) transparent}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bd);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 #app{display:grid;grid-template-columns:48px 260px 1fr 260px;height:100vh;overflow:hidden}
 
 /* ---- 액티비티 바 ---- */
@@ -76,6 +82,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .code pre.rest{margin:0;padding-left:50px;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
 .pad{padding:12px 14px}
 .hint{color:var(--muted)}
+/* 뷰 역할 한 줄 설명 */
+.vhint{font-size:12px;margin:0 0 10px}
 .err{color:var(--err)}
 .p{font-family:var(--mono);font-size:11px;color:var(--muted);word-break:break-all}
 .badge{display:inline-block;border:1px solid var(--bd);border-radius:10px;padding:0 7px;font-size:11px;color:var(--muted);white-space:nowrap}
@@ -92,13 +100,25 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .rule pre{margin:0;padding:10px;font:12px/1.7 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:60vh;overflow:auto;color:var(--fg)}
 /* 스킬 뷰 */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-items:start}
-.card{border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0}
+.card{display:block;width:100%;text-align:left;border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0}
+.card:hover{background:var(--hover)}
 /* OFF 카드: 텍스트 대비는 유지하고 배경/경계선만 흐리게 */
 .card.dim{border-style:dashed;border-color:var(--muted)}
-.card h4{margin:0 0 4px;font-size:13px;word-break:break-all}
-.card .kv{color:var(--muted);font-size:11px;margin-bottom:4px}
+.card .chd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.card h4{margin:0;flex:1;min-width:0;font-size:14px;font-weight:600;word-break:break-all}
 .card .desc{font-size:12px;max-height:9em;overflow:auto;color:var(--val)}
 .card .desc.none{color:var(--muted)}
+.badge.k-skill{color:var(--green);border-color:var(--green)}
+.badge.k-agent{color:var(--acc);border-color:var(--acc)}
+.badge.k-command{color:var(--warn);border-color:var(--warn)}
+/* 출처별 섹션 */
+.cardsec{display:flex;align-items:center;gap:6px;width:100%;text-align:left;margin:14px 0 6px;font-weight:600}
+.cardsec:first-child{margin-top:0}
+.cardsec .arw{width:12px;height:auto;line-height:inherit}
+.tbar input[type=search]{flex:1;min-width:120px;max-width:260px;font:inherit;color:var(--fg);
+      background:var(--ed);border:1px solid var(--bd);border-radius:4px;padding:3px 8px}
+.tbar .chip{color:var(--muted)}
+.tbar .chip[aria-pressed=true]{background:var(--sel);color:var(--selfg);border-color:var(--acc)}
 /* 훅 뷰 */
 .hookev{margin:14px 0 6px;font-weight:600}
 .hookrow{border-left:3px solid var(--bd);padding:5px 10px;margin:5px 0;background:var(--bg);border-radius:0 4px 4px 0}
@@ -190,6 +210,14 @@ textarea.ta{flex:1;min-height:160px;width:100%;resize:none;border:0;outline:none
 var MIN_VER = [2,1,199];
 var VIEWS = [["raw","파일"],["eff","규칙"],["cards","스킬"],["hooks","훅"],["mcp","MCP"]];
 var VIEW_TITLE = {raw:"파일", eff:"규칙", cards:"스킬·에이전트·커맨드", hooks:"훅 흐름", mcp:"MCP"};
+// 뷰 역할 한 줄 설명 — 패널 상단 문구와 액티비티 바 툴팁이 같은 문장을 쓴다
+var VIEW_HINT = {
+  raw:"탐색기에서 고른 파일의 원문. 편집·검증·저장 가능",
+  eff:"프로젝트에 실제로 적용되는 CLAUDE.md 체인 — 적용 순서대로",
+  cards:"전역 · 이 프로젝트 · 플러그인의 스킬/에이전트/커맨드와 이 프로젝트에서의 ON/OFF",
+  hooks:"settings.json 훅을 이벤트별 매처 → 명령 순서로. 색은 출처(전역/프로젝트/플러그인)",
+  mcp:"MCP 서버를 출처별로"};
+var KIND_KO = {skill:"스킬", agent:"에이전트", command:"커맨드"};
 var SCOPE_KO = {global:"전역",
   "global-rules":"전역 rules", project:"프로젝트", "project-local":"프로젝트 로컬",
   "project-rules":"프로젝트 rules", subdir:"하위 폴더"};
@@ -202,6 +230,8 @@ var S = {scan:null, project:null, tab:"raw", file:null, fileErr:null, filePath:n
          seq:0, fseq:0, sseq:0, eseq:0, loading:false, dead:false, scanErr:false,
          tabs:[], meta:Object.create(null), expanded:Object.create(null),
          eff:null, effErr:null, errOpen:false,
+         // cardq: 스킬 뷰 검색·종류 필터. 재스캔·프로젝트 전환에도 유지 (loadScan 이 건드리지 않음)
+         cardq:{q:"", kinds:{skill:true, agent:true, command:true}},
          // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls}
          edit:null, issues:null};
 function stale(seq){ return S.dead || seq !== S.seq; }
@@ -211,6 +241,7 @@ var SAMPLE = location.hash === "#sample";
 
 function el(tag, cls, text){var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
 function badge(text, cls){return el("span","badge"+(cls?" "+cls:""), text);}
+function viewHint(text){return el("p","hint vhint", text);}
 function clear(n){while(n.firstChild) n.removeChild(n.firstChild); return n;}
 function kb(n){return (typeof n==="number"? (n/1024).toFixed(1) : "?")+" KB";}
 function ymd(mtime){
@@ -357,7 +388,7 @@ function renderActivity(){
     b.setAttribute("aria-selected", String(S.tab === v[0]));
     b.setAttribute("aria-controls","panel");
     b.id = "tab-"+v[0];
-    b.title = VIEW_TITLE[v[0]];
+    b.title = VIEW_TITLE[v[0]] + " — " + VIEW_HINT[v[0]];
     b.onclick = function(){ setTab(v[0]); };
     bar.appendChild(b);
   });
@@ -669,8 +700,10 @@ function renderRaw(){
   if(S.edit && S.edit.path === S.filePath) return renderEdit(p);
   if(S.fileErr){ p.appendChild(el("div","pad")).appendChild(el("p","err", S.fileErr)); return; }
   if(!S.file){
-    p.appendChild(el("div","pad")).appendChild(
-      el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
+    var pd = p.appendChild(el("div","pad"));
+    // 파일이 열리면 툴바가 역할을 설명하므로, 미선택일 때만 한 줄 설명
+    if(!S.filePath) pd.appendChild(viewHint(VIEW_HINT.raw));
+    pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "탐색기에서 파일을 선택하세요."));
     return;
   }
   p.appendChild(readBar());
@@ -897,6 +930,9 @@ async function loadEff(){
 function renderEff(){
   var p = panel(), pad = el("div","pad");
   p.appendChild(pad);
+  pad.appendChild(viewHint(S.project
+    ? "프로젝트 " + (S.project.name || S.project.path) + "에 실제로 적용되는 CLAUDE.md 체인 — 적용 순서대로"
+    : "프로젝트를 선택하면 적용 순서대로 표시"));
   if(!S.project){ pad.appendChild(el("p","hint","탐색기에서 프로젝트 이름을 클릭하면 그 프로젝트에 적용되는 규칙이 순서대로 표시됩니다.")); return; }
   if(S.project.exists === false){ pad.appendChild(el("p","hint","경로가 존재하지 않는 프로젝트입니다.")); return; }
   if(S.effErr){
@@ -971,24 +1007,103 @@ function collect(){
   out.sort(function(a,b){ return a.rank - b.rank || a.name.localeCompare(b.name); });
   return out;
 }
-function renderCards(){
-  var p = panel(), pad = el("div","pad");
-  p.appendChild(pad);
-  if(!S.scan) return;
-  var list = collect();
-  pad.appendChild(el("p","hint", "총 "+list.length+"개"
-    + (S.project && S.project.exists === false ? " · 선택 프로젝트 경로 없음" : "")));
-  var grid = el("div","cards");
-  list.forEach(function(c){
-    var card = el("div","card"+(c.off?" dim":""));
-    card.appendChild(el("h4", null, c.name));
-    card.appendChild(el("div","kv", c.kind+" · "+c.origin));
-    if(c.off) card.appendChild(badge(c.offLabel || "OFF","off"));
-    card.appendChild(el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음"));
-    card.title = c.path;
-    grid.appendChild(card);
+// 출처 섹션 — collect() 의 origin 문자열에서 되읽는다 (collect 는 그대로 둔다)
+function cardSrc(c){
+  if(c.origin === "전역") return {key:"g", label:"전역", rank:0};
+  if(c.origin === "프로젝트") return {key:"p", label:"이 프로젝트", rank:1};
+  var nm = c.origin.indexOf("플러그인:") === 0 ? c.origin.slice(5) : c.origin;
+  return {key:"pl:"+nm, label:"플러그인 "+nm, rank:2, plugin:nm};
+}
+function cardMatch(c){
+  if(!S.cardq.kinds[c.kind]) return false;
+  var q = S.cardq.q.trim().toLowerCase();
+  if(!q) return true;
+  return String(c.name||"").toLowerCase().indexOf(q) >= 0
+      || String(c.desc||"").toLowerCase().indexOf(q) >= 0;
+}
+function cardBar(){
+  var bar = el("div","tbar");
+  var inp = el("input");
+  inp.type = "search";
+  inp.placeholder = "이름·설명 검색";
+  inp.setAttribute("aria-label","스킬·에이전트·커맨드 이름·설명 검색");
+  inp.value = S.cardq.q;
+  // 툴바는 다시 그리지 않는다 — 카드 영역만 갱신해야 입력 포커스가 유지된다
+  inp.oninput = function(){ S.cardq.q = inp.value; renderCardBody(); };
+  bar.appendChild(inp);
+  ["skill","agent","command"].forEach(function(k){
+    var b = el("button","chip", KIND_KO[k]);
+    b.setAttribute("aria-pressed", String(!!S.cardq.kinds[k]));
+    b.onclick = function(){
+      S.cardq.kinds[k] = !S.cardq.kinds[k];
+      b.setAttribute("aria-pressed", String(!!S.cardq.kinds[k]));
+      renderCardBody();
+    };
+    bar.appendChild(b);
   });
-  pad.appendChild(grid);
+  var cnt = el("span","hint");
+  cnt.id = "cardcount";
+  bar.appendChild(cnt);
+  return bar;
+}
+function renderCards(){
+  var p = panel();
+  p.appendChild(el("div","pad")).appendChild(viewHint(VIEW_HINT.cards));
+  if(!S.scan) return;
+  p.appendChild(cardBar());
+  var body = el("div","pad");
+  body.id = "cardbody";
+  p.appendChild(body);
+  renderCardBody();
+}
+function cardEl(c){
+  // ponytail: 출처는 섹션 헤더가 말해주므로 카드에서 뺐다
+  var card = el("button","card"+(c.off?" dim":""));
+  var hd = el("div","chd");
+  hd.appendChild(el("h4", null, c.name));
+  hd.appendChild(badge(KIND_KO[c.kind] || c.kind, "k-"+c.kind));
+  if(c.off) hd.appendChild(badge(c.offLabel || "OFF","off"));
+  card.appendChild(hd);
+  card.appendChild(el("div","desc"+(c.desc?"":" none"), c.desc || "설명 없음"));
+  card.title = c.path;
+  card.onclick = function(){ openFile(c.path); };
+  return card;
+}
+function renderCardBody(){
+  var body = document.getElementById("cardbody");
+  if(!body) return;
+  clear(body);
+  var all = collect(), shown = all.filter(cardMatch);
+  var cnt = document.getElementById("cardcount");
+  if(cnt) cnt.textContent = "표시 " + shown.length + " / 전체 " + all.length
+    + (S.project && S.project.exists === false ? " · 선택 프로젝트 경로 없음" : "");
+  var pOff = Object.create(null);
+  ((S.scan && S.scan.plugins) || []).forEach(function(pl){ pOff[pl.name || pl.key] = pluginOff(pl); });
+  var order = [], by = Object.create(null);
+  shown.forEach(function(c){
+    var s = cardSrc(c);
+    if(!by[s.key]){ by[s.key] = {src:s, items:[]}; order.push(by[s.key]); }
+    by[s.key].items.push(c);
+  });
+  order.sort(function(a,b){ return a.src.rank - b.src.rank || a.src.label.localeCompare(b.src.label); });
+  if(!order.length){ body.appendChild(el("p","hint","조건에 맞는 항목이 없습니다.")); return; }
+  var searching = !!S.cardq.q.trim();
+  order.forEach(function(sec){
+    var id = "cards:" + sec.src.key, dflt = sec.src.rank < 2;
+    // 검색 중에는 매칭이 있는 섹션을 펼쳐 보여준다 — 저장된 접힘 상태는 그대로
+    var open = searching || isOpen(id, dflt);
+    var h = el("button","cardsec");
+    h.setAttribute("aria-expanded", String(open));
+    h.appendChild(el("span","arw", open ? "▾" : "▸"));
+    h.appendChild(el("span", null, sec.src.label + " (" + sec.items.length + ")"));
+    if(sec.src.plugin && pOff[sec.src.plugin]) h.appendChild(badge("플러그인 OFF","off"));
+    h.onclick = function(){ S.expanded[id] = !isOpen(id, dflt); renderCardBody(); };
+    body.appendChild(h);
+    if(!open) return;
+    var grid = el("div","cards");
+    sec.items.forEach(function(c){ grid.appendChild(cardEl(c)); });
+    body.appendChild(grid);
+  });
 }
 
 /* 4. 훅 흐름 */
@@ -1019,6 +1134,7 @@ function groupHooks(hooks){
 function renderHooks(){
   var p = panel(), pad = el("div","pad");
   p.appendChild(pad);
+  pad.appendChild(viewHint(VIEW_HINT.hooks));
   var hooks = (S.scan && S.scan.hooks) || [];
   if(!hooks.length){ pad.appendChild(el("p","hint","등록된 훅이 없습니다.")); return; }
   var g = groupHooks(hooks);
@@ -1045,6 +1161,7 @@ function renderHooks(){
 function renderMcp(){
   var p = panel(), pad = el("div","pad");
   p.appendChild(pad);
+  pad.appendChild(viewHint(VIEW_HINT.mcp));
   var mcp = (S.scan && S.scan.mcp) || [];
   var order = [], bySrc = Object.create(null), ptitle = Object.create(null);
   mcp.forEach(function(m){
