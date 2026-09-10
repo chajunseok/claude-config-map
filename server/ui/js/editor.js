@@ -1,13 +1,18 @@
 // editor — 탭 스트립·파일 열기·원문 렌더·편집 모드(검증/저장/재읽기)
 "use strict";
+// 스캔 인덱스의 origin(내부 식별자)을 표시용 라벨로 — 값 자체는 바꾸지 않는다
+function originLabel(origin){
+  var s = String(origin || "");
+  return s.indexOf("플러그인 ") === 0 ? t("플러그인 {n}", {n:s.slice(5)}) : t(s);
+}
 /* ---------- 에디터 탭 줄 ---------- */
 function addTab(path){
   if(S.tabs.some(function(x){ return x.path === path; })) return;   // 이미 열린 탭은 위치 유지
   var m = S.meta[path] || {};
   var seg = String(path).split(/[\\/]/);
-  var t = isCompare(path) ? {path:path, name:"비교: "+cmpTitle(path), sub:"제목 비교"}
-                          : {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
-  S.tabs.push(t);
+  var tb = isCompare(path) ? {path:path, name: t("비교: {t}", {t:cmpTitle(path)}), sub: t("제목 비교")}
+                           : {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
+  S.tabs.push(tb);
   if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
 }
 function closeTab(path){
@@ -26,26 +31,26 @@ function closeTab(path){
 function renderTabstrip(){
   var strip = clear(document.getElementById("tabstrip"));
   strip.setAttribute("role","tablist");
-  if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
+  if(!S.tabs.length) strip.appendChild(el("div","tab empty", t("열린 파일 없음")));
   // 같은 이름·출처 탭이 여럿이면(SKILL.md 등) 상위 폴더를 붙여 구분 — 경로는 다르므로 중복 탭이 아니다
   var seen = Object.create(null);
-  S.tabs.forEach(function(t){ var k = t.name + "|" + t.sub; seen[k] = (seen[k] || 0) + 1; });
-  S.tabs.forEach(function(t){
-    var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
+  S.tabs.forEach(function(tb){ var k = tb.name + "|" + tb.sub; seen[k] = (seen[k] || 0) + 1; });
+  S.tabs.forEach(function(tb){
+    var d = el("div","tab"+(tb.path === S.filePath ? " act" : ""));
     var b = el("button","tabname");
     b.setAttribute("role","tab");
-    b.setAttribute("aria-selected", String(t.path === S.filePath));
-    if(t.path === S.filePath) b.setAttribute("aria-controls","panel");
-    var seg = String(t.path).split(/[\\/]/), shown = t.name;
-    if(!isCompare(t.path) && seen[t.name + "|" + t.sub] > 1 && seg.length > 1) shown = seg[seg.length-2] + "/" + t.name;
+    b.setAttribute("aria-selected", String(tb.path === S.filePath));
+    if(tb.path === S.filePath) b.setAttribute("aria-controls","panel");
+    var seg = String(tb.path).split(/[\\/]/), shown = tb.name;
+    if(!isCompare(tb.path) && seen[tb.name + "|" + tb.sub] > 1 && seg.length > 1) shown = seg[seg.length-2] + "/" + tb.name;
     b.appendChild(el("span","tf", shown));
-    if(t.sub) b.appendChild(el("span","ts", t.sub));
-    b.title = t.path;
-    b.onclick = function(){ openFile(t.path); };
+    if(tb.sub) b.appendChild(el("span","ts", originLabel(tb.sub)));
+    b.title = tb.path;
+    b.onclick = function(){ openFile(tb.path); };
     d.appendChild(b);
     var x = el("button","tabx","×");
-    x.setAttribute("aria-label", t.name + " 닫기");
-    x.onclick = function(){ closeTab(t.path); };
+    x.setAttribute("aria-label", t("{n} 닫기", {n:tb.name}));
+    x.onclick = function(){ closeTab(tb.path); };
     d.appendChild(x);
     strip.appendChild(d);
   });
@@ -58,14 +63,14 @@ function renderPathline(){
   if(!S.filePath || isCompare(S.filePath)) return;
   if(S.edit && S.edit.path === S.filePath) return;
   if(!S.file) return;
-  if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint","읽기 전용 (플러그인)"));
-  else bar.appendChild(ebtn("편집", function(){ startEdit(); }));
+  if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint", t("읽기 전용 (플러그인)")));
+  else bar.appendChild(ebtn(t("편집"), function(){ startEdit(); }));
   if(keys(headMap()).length){
-    bar.appendChild(ebtn("모두 접기", function(){ foldAll(true); }));
-    bar.appendChild(ebtn("모두 펼치기", function(){ foldAll(false); }));
+    bar.appendChild(ebtn(t("모두 접기"), function(){ foldAll(true); }));
+    bar.appendChild(ebtn(t("모두 펼치기"), function(){ foldAll(false); }));
   }
   var m = S.meta[S.filePath] || {};
-  if(m.shared) bar.appendChild(el("span","hint","팀 공유 · git"));
+  if(m.shared) bar.appendChild(el("span","hint", t("팀 공유 · git")));
 }
 function ebtn(text, fn){ var b = el("button","ebtn", text); b.onclick = fn; return b; }
 
@@ -102,8 +107,9 @@ async function openFile(path, opts){
       ? await getJSON("/api/compare?title="+encodeURIComponent(cmpTitle(path)))
       : await getJSON("/api/file?path="+encodeURIComponent(path));
   }catch(e){
-    err = (isCompare(path) ? "비교하지 못했습니다: "+cmpTitle(path) : "파일을 불러오지 못했습니다: "+path)
-        + " — " + e.message;
+    err = (isCompare(path) ? t("비교하지 못했습니다: {t}", {t:cmpTitle(path)})
+                           : t("파일을 불러오지 못했습니다: {p}", {p:path}))
+        + " — " + tMsg(e.message);
   }
   if(S.dead || sseq !== S.sseq || fseq !== S.fseq) return;
   S.file = file; S.fileErr = err;
@@ -137,8 +143,8 @@ function renderRaw(){
   if(!S.file){
     var pd = p.appendChild(el("div","pad"));
     // 파일이 열리면 경로 줄 툴바가 역할을 설명하므로, 미선택일 때만 한 줄 설명
-    if(!S.filePath) pd.appendChild(viewHint("왼쪽 목록에서 항목을 선택하세요 · 액티비티 바로 파일/규칙/스킬/훅/MCP 전환"));
-    pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "열린 파일이 없습니다."));
+    if(!S.filePath) pd.appendChild(viewHint(t("왼쪽 목록에서 항목을 선택하세요 · 액티비티 바로 파일/규칙/스킬/훅/MCP 전환")));
+    pd.appendChild(el("p","hint", S.filePath ? t("불러오는 중… {p}", {p:S.filePath}) : t("열린 파일이 없습니다.")));
     return;
   }
   if(isCompare(S.filePath)) return renderCompare(p);
@@ -154,7 +160,7 @@ function renderRaw(){
     if(!sec || !folded || !folded[i]) continue;
     var hid = Math.min(sec.end, lines.length) - i - 1;
     if(hid <= 0) continue;
-    box.appendChild(el("div","folded", "… "+hid+"줄"));
+    box.appendChild(el("div","folded", t("… {n}줄", {n:hid})));
     i = Math.min(sec.end, n) - 1;      // 접힌 구간은 건너뛴다
   }
   if(lines.length > n) box.appendChild(el("pre","rest", lines.slice(n).join("\n")));
@@ -185,7 +191,8 @@ function lineRow(i, text, sec){
     var open = !(S.folds[S.filePath] || {})[i];
     var fb = el("button","fold", open ? "▾" : "▸");
     fb.setAttribute("aria-expanded", String(open));
-    fb.setAttribute("aria-label", (sec.title || "섹션") + " 접기·펼치기");
+    fb.setAttribute("aria-label", sec.title ? t("{n} 접기·펼치기", {n:sec.title})
+                                            : t("섹션 접기·펼치기"));
     fb.onclick = function(){ toggleFold(i); };
     ln.appendChild(fb);
   }
@@ -193,7 +200,7 @@ function lineRow(i, text, sec){
   row.appendChild(ln);
   row.appendChild(el("span","src", text));
   if(sec && !isPluginFile(S.filePath)){
-    var eb = el("button","seced","이 섹션 편집");
+    var eb = el("button","seced", t("이 섹션 편집"));
     eb.onclick = function(){ startEdit(sec); };
     row.appendChild(eb);
   }
@@ -203,17 +210,18 @@ function lineRow(i, text, sec){
 function renderCompare(p){
   var ms = (S.file && S.file.matches) || [];
   var bar = el("div","tbar");
-  bar.appendChild(el("span","hint", "제목 비교 · " + cmpTitle(S.filePath) + " · " + ms.length + "곳"));
+  bar.appendChild(el("span","hint", t("제목 비교 · {t} · {n}곳",
+                                      {t:cmpTitle(S.filePath), n:ms.length})));
   p.appendChild(bar);
-  if(!ms.length){ p.appendChild(el("div","pad")).appendChild(el("p","hint","같은 제목의 섹션이 없습니다.")); return; }
+  if(!ms.length){ p.appendChild(el("div","pad")).appendChild(el("p","hint", t("같은 제목의 섹션이 없습니다."))); return; }
   var box = el("div","cmp");
   ms.forEach(function(m){
     var card = el("div","cmpitem");
     var h = el("button","cmphd");
-    h.appendChild(el("span","t", m.project || "전역"));
-    h.appendChild(badge(SCOPE_KO[m.scope] || m.scope));
+    h.appendChild(el("span","t", m.project || t("전역")));
+    h.appendChild(badge(t(SCOPE_KO[m.scope] || m.scope)));
     h.appendChild(el("span","p", m.path + " · L" + (m.start+1) + "–L" + m.end));
-    h.title = m.path + " — 이 줄로 이동";
+    h.title = t("{p} — 이 줄로 이동", {p:m.path});
     h.onclick = function(){ openFile(m.path, {line:m.start}); };
     card.appendChild(h);
     card.appendChild(el("pre","cmpbody", m.text || ""));
@@ -232,12 +240,14 @@ function isPluginFile(path){
 function tbtn(text, fn){ var b = el("button", null, text); b.onclick = fn; return b; }
 function issueList(issues){
   var box = el("div","issues");
-  if(!issues.length){ box.appendChild(el("div","hint","문제 없음")); return box; }
+  if(!issues.length){ box.appendChild(el("div","hint", t("문제 없음"))); return box; }
   issues.forEach(function(it){
     var lv = it.level === "error" ? "error" : "warnlv";
     var d = el("div","iss "+lv);
-    d.appendChild(el("span","rl", (it.rule || "?") + (it.line != null ? " · "+it.line+"행" : "")));
-    d.appendChild(document.createTextNode(it.message || ""));
+    d.appendChild(el("span","rl", it.line != null
+      ? t("{rule} · {line}행", {rule:it.rule || "?", line:it.line})
+      : (it.rule || "?")));
+    d.appendChild(document.createTextNode(tMsg(it.message || "")));
     box.appendChild(d);
   });
   return box;
@@ -260,7 +270,7 @@ function startEdit(sec){
 // 편집을 버려도 되는지 — 버려도 되면 편집 상태를 지우고 true
 function guardEdit(){
   if(!S.edit) return true;
-  if(S.edit.dirty && !confirm("저장하지 않은 변경이 있습니다. 버릴까요?")) return false;
+  if(S.edit.dirty && !confirm(t("저장하지 않은 변경이 있습니다. 버릴까요?"))) return false;
   var a = S.edit.assist;
   if(a && a.id) postJSON("/api/assist-cancel", {id:a.id}).catch(function(){});   // 응답은 무시
   S.edit = null; ED = null;
@@ -275,32 +285,32 @@ function renderEdit(p){
   var e = S.edit, m = S.meta[e.path] || {};
   var wrap = el("div","edit");
   var bar = el("div","tbar");
-  var bV = tbtn("검증", doValidate), bS = tbtn("저장", doSave), bC = tbtn("취소", cancelEdit);
-  bV.title = "저장하지 않고 규칙 검사만 — JSON 문법, frontmatter name/description, 훅 스크립트·@import·링크 경로 실존, * 매처 중복. error는 저장 차단, warn은 안내";
-  bS.title = "검증 후 저장 (백업 생성). error가 있으면 저장되지 않음";
-  bC.title = "편집 취소 (수정 내용 버림)";
+  var bV = tbtn(t("검증"), doValidate), bS = tbtn(t("저장"), doSave), bC = tbtn(t("취소"), cancelEdit);
+  bV.title = t("저장하지 않고 규칙 검사만 — JSON 문법, frontmatter name/description, 훅 스크립트·@import·링크 경로 실존, * 매처 중복. error는 저장 차단, warn은 안내");
+  bS.title = t("검증 후 저장 (백업 생성). error가 있으면 저장되지 않음");
+  bC.title = t("편집 취소 (수정 내용 버림)");
   bar.appendChild(bV); bar.appendChild(bS); bar.appendChild(bC);
-  var st = el("span","hint", e.dirty ? "수정됨" : "변경 없음");
+  var st = el("span","hint", e.dirty ? t("수정됨") : t("변경 없음"));
   bar.appendChild(st);
   if(e.range)
     bar.appendChild(el("span","rangelbl",
-      "섹션 편집 중: " + (e.range.title || "(제목 없음)")
-      + " (L" + (e.range.start+1) + "–L" + e.range.end + ")"));
+      t("섹션 편집 중: {t} (L{a}–L{b})",
+        {t:e.range.title || t("(제목 없음)"), a:e.range.start+1, b:e.range.end})));
   wrap.appendChild(bar);
   if(!e.assist) e.assist = newAssist();
   var as = buildAssist(e);
   wrap.appendChild(as.node);
-  if(m.shared) wrap.appendChild(el("div","sharewarn","git 추적 파일 — 커밋하면 팀 전체에 적용됨"));
+  if(m.shared) wrap.appendChild(el("div","sharewarn", t("git 추적 파일 — 커밋하면 팀 전체에 적용됨")));
   var msg = el("div","edmsg");
   wrap.appendChild(msg);
   var ta = el("textarea","ta");
   ta.value = e.text;
   ta.spellcheck = false;
-  ta.setAttribute("aria-label", e.path + " 편집");
+  ta.setAttribute("aria-label", t("{p} 편집", {p:e.path}));
   ta.oninput = function(){
     if(!S.edit) return;
     S.edit.text = ta.value; S.edit.dirty = true;
-    st.textContent = "수정됨";
+    st.textContent = t("수정됨");
   };
   wrap.appendChild(ta);
   var iss = el("div");
@@ -320,7 +330,7 @@ function refreshEdit(){
   msg.className = "edmsg" + (e.msgCls ? " "+e.msgCls : "");
   if(e.msg) msg.appendChild(el("span", null, e.msg));
   if(e.conflict){
-    var b = el("button","linkbtn","다시 읽기");
+    var b = el("button","linkbtn", t("다시 읽기"));
     b.onclick = reReadFile;
     msg.appendChild(b);
   }
@@ -337,7 +347,7 @@ async function doValidate(){
   var e = S.edit;
   if(!e || e.busy) return;
   var path = e.path;
-  editBusy("검증 중…");
+  editBusy(t("검증 중…"));
   var res = null, err = null;
   try{ res = await postJSON("/api/validate", {path:path, text:fullText(S.edit)}); }
   catch(ex){ err = ex.message; }
@@ -345,7 +355,7 @@ async function doValidate(){
   S.edit.busy = false;
   if(err || !res.ok){
     S.edit.issues = null;
-    S.edit.msg = "검증하지 못했습니다: " + (err || resErr(res));
+    S.edit.msg = t("검증하지 못했습니다: {e}", {e:tMsg(err || resErr(res))});
     S.edit.msgCls = "bad";
   }else{
     S.edit.issues = res.body.issues || [];
@@ -357,17 +367,17 @@ async function doSave(){
   var e = S.edit;
   if(!e || e.busy) return;
   if(e.conflict){
-    e.msg = "디스크에서 변경됨 — 다시 읽기 후 저장하세요."; e.msgCls = "bad";
+    e.msg = t("디스크에서 변경됨 — 다시 읽기 후 저장하세요."); e.msgCls = "bad";
     refreshEdit();
     return;
   }
   var path = e.path, text = e.text, range = e.range;
   if(range && !text.trim()){
-    e.msg = "섹션 본문이 비어 있습니다 — 섹션 삭제는 지원하지 않습니다."; e.msgCls = "bad";
+    e.msg = t("섹션 본문이 비어 있습니다 — 섹션 삭제는 지원하지 않습니다."); e.msgCls = "bad";
     refreshEdit();
     return;
   }
-  editBusy("저장 중…");
+  editBusy(t("저장 중…"));
   var res = null, err = null;
   try{
     res = range
@@ -379,7 +389,7 @@ async function doSave(){
   if(!editAlive(path)) return;
   S.edit.busy = false;
   if(err){
-    S.edit.msg = "저장하지 못했습니다: " + err; S.edit.msgCls = "bad";
+    S.edit.msg = t("저장하지 못했습니다: {e}", {e:tMsg(err)}); S.edit.msgCls = "bad";
     return refreshEdit();
   }
   var b = res.body;
@@ -393,7 +403,7 @@ async function doSave(){
     }
     S.edit = null; ED = null;
     S.issues = (b.issues && b.issues.length) ? b.issues : null;   // warn 은 저장 후에도 남긴다
-    S.msg = "저장됨 · 백업 " + (b.backup || "(경로 미상)");
+    S.msg = t("저장됨 · 백업 {p}", {p:b.backup || t("(경로 미상)")});
     S.msgOk = true;
     renderRaw();
     renderInspector();
@@ -401,13 +411,13 @@ async function doSave(){
   }
   if(res.status === 422){
     S.edit.issues = b.issues || [];
-    S.edit.msg = "검증 오류가 있어 저장하지 않았습니다."; S.edit.msgCls = "bad";
+    S.edit.msg = t("검증 오류가 있어 저장하지 않았습니다."); S.edit.msgCls = "bad";
   }else if(res.status === 409){
     S.edit.conflict = true;
-    S.edit.msg = "디스크에서 변경됨 — 다시 읽기 후 저장할 수 있습니다.";
+    S.edit.msg = t("디스크에서 변경됨 — 다시 읽기 후 저장할 수 있습니다.");
     S.edit.msgCls = "bad";
   }else{
-    S.edit.msg = "저장하지 못했습니다: " + resErr(res); S.edit.msgCls = "bad";
+    S.edit.msg = t("저장하지 못했습니다: {e}", {e:tMsg(resErr(res))}); S.edit.msgCls = "bad";
   }
   refreshEdit();
 }
@@ -416,19 +426,19 @@ async function reReadFile(){
   var e = S.edit;
   if(!e || e.busy) return;
   var path = e.path;
-  editBusy("다시 읽는 중…");
+  editBusy(t("다시 읽는 중…"));
   var file = null, err = null;
   try{ file = await getJSON("/api/file?path="+encodeURIComponent(path)); }
   catch(ex){ err = ex.message; }
   if(!editAlive(path)) return;
   S.edit.busy = false;
   if(err){
-    S.edit.msg = "다시 읽지 못했습니다: " + err; S.edit.msgCls = "bad";
+    S.edit.msg = t("다시 읽지 못했습니다: {e}", {e:tMsg(err)}); S.edit.msgCls = "bad";
     return refreshEdit();
   }
   if(S.filePath === path){ S.file = file; S.fileCache[path] = file; }
   S.edit.conflict = false;
-  S.edit.msg = "디스크 내용을 다시 읽었습니다. 편집본은 그대로이며, 저장하면 덮어씁니다.";
+  S.edit.msg = t("디스크 내용을 다시 읽었습니다. 편집본은 그대로이며, 저장하면 덮어씁니다.");
   S.edit.msgCls = "";
   var moved = relocate(S.edit, file);
   if(moved){
@@ -454,7 +464,7 @@ function relocate(e, file){
   var st = Math.min(e.range.start, lines.length), en = Math.min(e.range.end, lines.length);
   e.text = spliceLines(lines.join("\n"), st, en, e.text);
   e.range = null;
-  return "섹션 제목을 디스크에서 찾지 못해 전체 편집으로 전환했습니다 — 원래 줄 범위에 편집본을 넣었으니 확인 후 저장하세요.";
+  return t("섹션 제목을 디스크에서 찾지 못해 전체 편집으로 전환했습니다 — 원래 줄 범위에 편집본을 넣었으니 확인 후 저장하세요.");
 }
 // 섹션 편집이면 검증용 전문 합성
 function fullText(e){
@@ -477,24 +487,24 @@ function buildAssist(e){
   pr.rows = 1;
   pr.value = a.prompt;
   pr.spellcheck = false;
-  pr.placeholder = "Claude에게 수정 지시… (긴 문서는 섹션 편집 권장)";
-  pr.setAttribute("aria-label","Claude 수정 지시");
+  pr.placeholder = t("Claude에게 수정 지시… (긴 문서는 섹션 편집 권장)");
+  pr.setAttribute("aria-label", t("Claude 수정 지시"));
   pr.oninput = function(){ if(S.edit && S.edit.assist) S.edit.assist.prompt = pr.value; };
   pr.onkeydown = function(ev){
     if(ev.key === "Enter" && !ev.shiftKey){ ev.preventDefault(); doAssist(); }
   };
   row.appendChild(pr);
   var sel = el("select","amodel");
-  sel.setAttribute("aria-label","모델");
+  sel.setAttribute("aria-label", t("모델"));
   [["","기본 모델"],["sonnet","sonnet"],["opus","opus"],["haiku","haiku"]].forEach(function(o){
-    var op = el("option", null, o[1]);
+    var op = el("option", null, t(o[1]));
     op.value = o[0];
     sel.appendChild(op);
   });
   sel.value = a.model || "";
   sel.onchange = function(){ if(S.edit && S.edit.assist) S.edit.assist.model = sel.value; };
   row.appendChild(sel);
-  var go = ebtn("요청", doAssist);
+  var go = ebtn(t("요청"), doAssist);
   row.appendChild(go);
   box.appendChild(row);
   var msg = el("div","amsg");
@@ -505,8 +515,8 @@ function buildAssist(e){
   box.appendChild(dv);
   var acts = el("div","aacts");
   acts.hidden = true;
-  acts.appendChild(ebtn("적용", applyAssist));
-  acts.appendChild(ebtn("버리기", discardAssist));
+  acts.appendChild(ebtn(t("적용"), applyAssist));
+  acts.appendChild(ebtn(t("버리기"), discardAssist));
   box.appendChild(acts);
   return {node:box, refs:{prompt:pr, model:sel, go:go, msg:msg, diff:dv, acts:acts}};
 }
@@ -528,20 +538,21 @@ function refreshAssist(){
   var msg = clear(A.msg);
   msg.className = "amsg" + (a.error ? " err" : "");
   if(running){
-    msg.appendChild(el("span", null, "요청 중… " + a.elapsed + "초"));
-    var cb = el("button","linkbtn","취소");
+    msg.appendChild(el("span", null, t("요청 중… {n}초", {n:a.elapsed})));
+    var cb = el("button","linkbtn", t("취소"));
     cb.onclick = cancelAssist;
     msg.appendChild(cb);
   }else if(a.error){
     msg.appendChild(el("span", null, a.error));
   }else if(a.status === "done"){
     msg.appendChild(el("span", null, a.changed
-      ? "제안 (" + diffCount(a.diff) + "줄 변경)" + (a.cost != null ? " · $" + a.cost.toFixed(4) : "")
-      : "변경 없음"));
+      ? t("제안 ({n}줄 변경)", {n:diffCount(a.diff)})
+        + (a.cost != null ? " · $" + a.cost.toFixed(4) : "")
+      : t("변경 없음")));
   }else if(a.status === "applied"){
-    msg.appendChild(el("span", null, "제안을 본문에 적용했습니다."));
+    msg.appendChild(el("span", null, t("제안을 본문에 적용했습니다.")));
   }else if(a.status === "discarded"){
-    msg.appendChild(el("span", null, "제안을 버렸습니다."));
+    msg.appendChild(el("span", null, t("제안을 버렸습니다.")));
   }
   var show = a.status === "done" && a.changed && a.result != null;
   var dv = clear(A.diff);
@@ -562,7 +573,7 @@ async function doAssist(){
   var instruction = String(a.prompt || "").trim();
   a.result = null; a.diff = null; a.changed = false; a.cost = null; a.elapsed = 0;
   if(!instruction){
-    a.status = null; a.error = "수정 지시를 입력하세요.";
+    a.status = null; a.error = t("수정 지시를 입력하세요.");
     return refreshAssist();
   }
   a.error = null; a.status = "running"; a.id = "…";  // 요청 중 표시. 실제 id 는 202 응답
@@ -576,9 +587,9 @@ async function doAssist(){
   a.id = null;
   if(err || !res.ok){
     a.status = "error";
-    a.error = err ? "요청하지 못했습니다: " + err
-            : res.status === 503 ? "Claude Code CLI 를 찾지 못했습니다 — 설치·로그인 후 다시 시도"
-            : res.status === 429 ? "이미 실행 중인 요청이 많습니다" : resErr(res);
+    a.error = err ? t("요청하지 못했습니다: {e}", {e:tMsg(err)})
+            : res.status === 503 ? t("Claude Code CLI 를 찾지 못했습니다 — 설치·로그인 후 다시 시도")
+            : res.status === 429 ? t("이미 실행 중인 요청이 많습니다") : tMsg(resErr(res));
     return refreshAssist();
   }
   a.id = res.body.id;
@@ -595,7 +606,7 @@ function pollAssist(path, id){
     if(!assistAlive(path, id)) return;
     var a = S.edit.assist;
     if(err){
-      a.id = null; a.status = "error"; a.error = "상태를 확인하지 못했습니다: " + err;
+      a.id = null; a.status = "error"; a.error = t("상태를 확인하지 못했습니다: {e}", {e:tMsg(err)});
       return refreshAssist();
     }
     a.elapsed = Math.round((b.elapsed_ms || 0) / 1000);
@@ -607,7 +618,7 @@ function pollAssist(path, id){
       a.cost = typeof b.cost_usd === "number" ? b.cost_usd : null;
       a.error = null;
     }else{
-      a.error = b.status === "cancelled" ? "취소했습니다." : (b.error || "요청이 실패했습니다.");
+      a.error = b.status === "cancelled" ? t("취소했습니다.") : (b.error ? tMsg(b.error) : t("요청이 실패했습니다."));
     }
     refreshAssist();
   }, 1000);
@@ -619,7 +630,7 @@ function cancelAssist(){
   var a = S.edit && S.edit.assist;
   if(!a || !a.id) return;
   postJSON("/api/assist-cancel", {id:a.id}).catch(function(){});
-  a.id = null; a.status = "cancelled"; a.error = "취소했습니다.";
+  a.id = null; a.status = "cancelled"; a.error = t("취소했습니다.");
   refreshAssist();
 }
 // 적용 = textarea·S.edit.text 만 바꿈다. 저장·검증 흐름은 그대로
@@ -630,7 +641,7 @@ function applyAssist(){
   e.text = a.result;
   e.dirty = true;
   e.issues = null;                       // 본문이 바뀌었으므로 직전 검증 결과는 버린다
-  if(ED.st) ED.st.textContent = "수정됨";
+  if(ED.st) ED.st.textContent = t("수정됨");
   a.result = null; a.diff = null; a.changed = false; a.status = "applied"; a.error = null;
   refreshEdit();
   refreshAssist();

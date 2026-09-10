@@ -1,376 +1,384 @@
+[한국어](README.ko.md)
+
 # claude-config-map
 
-PC 안에 흩어진 Claude Code 설정을 한 화면에서 조망하고, 안전하게 고치는 로컬 도구다.
+A local tool that puts every Claude Code setting scattered across your PC on one screen, and lets you fix them safely.
 
-Claude Code 설정은 여러 곳에 나뉘어 있다 — 전역 `~/.claude/CLAUDE.md` 와 `rules/`, 프로젝트마다의 `CLAUDE.md`·`.claude/settings.json`·`.mcp.json`, 스킬·에이전트·커맨드 폴더, 플러그인이 끌고 오는 스킬과 MCP 서버, 그리고 `~/.claude.json` 의 프로젝트 목록. "지금 이 프로젝트에서 어떤 규칙이 실제로 적용되나", "이 훅은 어디서 왔나", "같은 제목 섹션이 전역과 프로젝트에 둘 다 있나" 같은 질문에 답하려면 파일을 여럿 열어 봐야 한다. 이 도구는 그것을 스캔해 브라우저 한 화면에 IDE처럼 펼치고, 편집·검증·백업·토글까지 그 자리에서 처리한다.
+Claude Code configuration lives in many places — the global `~/.claude/CLAUDE.md` and `rules/`, each project's `CLAUDE.md`, `.claude/settings.json` and `.mcp.json`, the skills/agents/commands folders, the skills and MCP servers that plugins bring along, and the project list in `~/.claude.json`. Answering questions like "which rules actually apply in this project", "where did this hook come from", or "does the same section title exist both globally and in the project" means opening a pile of files. This tool scans all of it, lays it out IDE-style in one browser screen, and handles editing, validation, backups, and toggles right there.
 
-- Python 표준 라이브러리만 쓴다. 추가 패키지 설치 없음.
-- 로컬 전용이다. `127.0.0.1` 에만 바인딩하고, 브라우저 밖에서 온 요청(Origin 불일치)은 거부한다.
-- 읽기 우선이다. 사용자가 UI에서 직접 저장·토글한 파일만 쓰고, 그 전에 반드시 백업을 남긴다.
+- Python standard library only. No extra packages to install.
+- Local only. It binds to `127.0.0.1` only and rejects requests from outside the browser (Origin mismatch).
+- Read-first. It writes only the files you explicitly save or toggle in the UI, and always makes a backup first.
 
 ---
 
-## 목차
+## Contents
 
-1. [설치](#설치)
-2. [요구사항](#요구사항)
-3. [실행](#실행)
-4. [화면 구성](#화면-구성)
-5. [사이드바 5종](#사이드바-5종)
-6. [에디터](#에디터)
-7. [인스펙터와 상태바](#인스펙터와-상태바)
-8. [기능 상세](#기능-상세)
-   - [스캔 범위와 규칙](#스캔-범위와-규칙)
-   - [편집·검증·저장·백업](#편집검증저장백업)
-   - [섹션 (CLAUDE.md 구조)](#섹션-claudemd-구조)
-   - [토글 (스킬·플러그인 ON/OFF)](#토글-스킬플러그인-onoff)
-   - [편집 도우미 (Claude CLI)](#편집-도우미-claude-cli)
-9. [이 도구가 읽고 쓰는 파일](#이-도구가-읽고-쓰는-파일)
-10. [보안](#보안)
+1. [Install](#install)
+2. [Requirements](#requirements)
+3. [Running](#running)
+4. [Layout](#layout)
+5. [The five sidebars](#the-five-sidebars)
+6. [Editor](#editor)
+7. [Inspector and status bar](#inspector-and-status-bar)
+8. [Feature details](#feature-details)
+   - [Scan scope and rules](#scan-scope-and-rules)
+   - [Edit, validate, save, back up](#edit-validate-save-back-up)
+   - [Sections (CLAUDE.md structure)](#sections-claudemd-structure)
+   - [Toggles (skills and plugins ON/OFF)](#toggles-skills-and-plugins-onoff)
+   - [Edit assistant (Claude CLI)](#edit-assistant-claude-cli)
+9. [Files this tool reads and writes](#files-this-tool-reads-and-writes)
+10. [Security](#security)
 11. [HTTP API](#http-api)
-12. [문제 해결](#문제-해결)
-13. [개발](#개발)
-14. [알려진 제한](#알려진-제한)
+12. [Troubleshooting](#troubleshooting)
+13. [Development](#development)
+14. [Known limits](#known-limits)
 
 ---
 
-## 설치
+## Install
 
-Claude Code 세션에서 두 줄을 실행한다.
+Run two lines in a Claude Code session.
 
 ```
 /plugin marketplace add chajunseok/claude-config-map
 /plugin install config-map@claude-config-map
 ```
 
-설치 후 **새 세션**에서 `/config-map` 이 인식된다. 같은 세션에서는 "Unknown command" 가 뜰 수 있다.
+After installing, `/config-map` is recognized in a **new session**. In the same session you may still get "Unknown command".
 
-업데이트는 `uninstall` → `install` 순서가 확실하다. 플러그인은 `~/.claude/plugins/cache/claude-config-map/config-map/<버전>/` 에 풀리며, 이 도구는 그 폴더에 아무것도 쓰지 않으므로 버전이 바뀌어도 사용자 데이터가 사라지지 않는다.
+To update, `uninstall` → `install` is the reliable order. The plugin is unpacked into `~/.claude/plugins/cache/claude-config-map/config-map/<version>/`, and this tool writes nothing into that folder, so your data survives a version change.
 
-## 요구사항
+## Requirements
 
-| 항목 | 조건 | 비고 |
+| Item | Condition | Notes |
 |---|---|---|
-| Python | **3.11 이상 (필수)** | 플러그인은 Python을 동봉하지 않는다. 없으면 `/config-map` 이 설치 안내 문구만 출력하고 끝난다. [python.org/downloads](https://www.python.org/downloads/) |
-| Claude Code | 2.1.199 이상 권장 | 미만이어도 조망·편집은 동작한다. 스킬 토글(`skillOverrides`)이 실제로 적용되는지는 버전에 달려 있고, 미확인이면 UI가 경고를 띄운다 |
-| 브라우저 | 최신 Chrome / Edge / Firefox | 프레임워크 없는 vanilla JS. 외부 CDN·폰트를 쓰지 않는다 |
-| Claude Code CLI 로그인 | 편집 도우미 기능에만 | 나머지 기능은 CLI 없이 동작한다 |
+| Python | **3.11 or newer (required)** | The plugin does not bundle Python. Without it, `/config-map` only prints the install message and stops. [python.org/downloads](https://www.python.org/downloads/) |
+| Claude Code | 2.1.199 or newer recommended | Older versions still view and edit fine. Whether skill toggles (`skillOverrides`) actually take effect depends on the version, and the UI warns when it cannot be confirmed |
+| Browser | Recent Chrome / Edge / Firefox | Framework-free vanilla JS. No external CDN or fonts |
+| Claude Code CLI login | Only for the edit assistant | Everything else works without the CLI |
 
-## 실행
+## Running
 
-### 슬래시 커맨드
+### Slash command
 
 ```
 /config-map
 ```
 
-커맨드는 `python3` → `python` → `py -3` 순으로 3.11 이상인 첫 Python을 찾아 서버를 백그라운드로 띄우고, stdout 첫 줄의 URL(기본 `http://127.0.0.1:8765`)을 대화에 보여준다. 브라우저도 자동으로 연다.
+The command looks for the first Python that is 3.11 or newer in the order `python3` → `python` → `py -3`, starts the server in the background, and shows the URL from the first line of stdout (`http://127.0.0.1:8765` by default) in the conversation. It also opens the browser automatically.
 
-### 직접 실행
+### Direct run
 
 ```bash
-python server/web_server.py                 # 8765, 브라우저 자동 열기
-python server/web_server.py --port 9000     # 포트 지정
-python server/web_server.py --no-browser    # URL만 출력
+python server/web_server.py                 # 8765, opens the browser
+python server/web_server.py --port 9000     # pick a port
+python server/web_server.py --no-browser    # print the URL only
 ```
 
-| 옵션 | 기본 | 설명 |
+| Option | Default | Description |
 |---|---|---|
-| `--port N` | 8765 | 사용 중이면 자동으로 다음 빈 포트를 쓴다 |
-| `--no-browser` | 끔 | 브라우저를 열지 않고 URL만 출력 |
-| `--host` | `127.0.0.1` | 테스트용. 바꾸지 않는 것을 권장 |
+| `--port N` | 8765 | If it is taken, the next free port is used automatically |
+| `--no-browser` | off | Print the URL without opening a browser |
+| `--host` | `127.0.0.1` | For testing. Leaving it alone is recommended |
 
-| 환경변수 | 설명 |
+| Environment variable | Description |
 |---|---|
-| `CLAUDE_CONFIG_MAP_HOME` | 홈 디렉터리를 강제 지정. 격리 테스트용. 지정하지 않으면 `.claude.json` 이 있는 쪽(`Path.home()` → `USERPROFILE` → `HOME` 순)을 홈으로 본다 |
+| `CLAUDE_CONFIG_MAP_HOME` | Force the home directory. For isolated testing. If unset, the home is whichever of `Path.home()` → `USERPROFILE` → `HOME` has `.claude.json` |
 
-### 단일 인스턴스
+### Language
 
-서버는 `~/.claude/config-map/server.json` 에 `{port, pid, url}` 을 기록한다. 다시 실행하면 그 URL에 `/api/ping` 을 보내 살아 있으면 **기존 URL만 열고 바로 종료**한다. 죽은 기록이면 새로 띄운다. 종료는 UI의 `종료` 버튼(상태바 또는 액티비티 바 하단)이며, 종료 시 기록을 지운다.
+The UI follows the browser language: Korean browsers get Korean, everything else gets English. You can switch it with the language button at the bottom of the activity bar (it reads `EN` while the UI is in Korean, and shows the Korean label while it is in English), and the choice is remembered in the browser.
 
-편집 중(저장하지 않은 변경)에는 종료·재스캔이 확인 창을 띄운다.
+### Single instance
+
+The server records `{port, pid, url}` in `~/.claude/config-map/server.json`. On a second run it sends `/api/ping` to that URL, and if the old server is alive it **just opens the existing URL and exits**. If the record is dead, it starts a new one. To stop it, use the UI's `Quit` button (status bar or bottom of the activity bar), which also clears the record.
+
+While editing (unsaved changes), quitting and rescanning ask for confirmation.
 
 ---
 
-## 화면 구성
+## Layout
 
 ```
 ┌────┬──────────────┬──────────────────────────────┬──────────────┐
-│ 액 │ 사이드바      │ 에디터                        │ 인스펙터      │
-│ 티 │ 헤더 (제목·수)│ 탭 줄 (열린 파일, 최대 6)      │ 헤더 (선택명) │
-│ 비 │ 툴바 (검색·칩)│ 경로 줄 + 편집/접기 버튼        │ 선택 대상의   │
-│ 티 │ 컨텍스트 줄   │ 줄번호 원문 / 편집 모드 /        │ 섹션만        │
-│ 바 │ 그룹 헤더     │ 비교 탭                        │              │
-│    │ 28px 행 …    │                              │              │
+│ Ac │ Sidebar      │ Editor                       │ Inspector    │
+│ ti │ header (n)   │ tab row (open files, max 6)  │ header       │
+│ vi │ toolbar      │ path row + edit/fold buttons │ sections for │
+│ ty │ context row  │ numbered source / edit mode /│ the selection│
+│ ba │ group header │ compare tab                  │              │
+│ r  │ 28px rows …  │                              │              │
 ├────┼──────────────┴──────────────────────────────┴──────────────┤
-│    │ 상태바: 스캔 시각 · Claude Code 버전 · 오류 N건 · [우측 상태] · 재스캔 · 종료 │
+│    │ Status bar: scan time · Claude Code version · N errors · [state] · Rescan · Quit │
 └────┴────────────────────────────────────────────────────────────┘
   56px      300px                  1fr                     272px
 ```
 
-- **액티비티 바**(좌측 56px) — 아이콘 5개가 **사이드바 내용**을 바꾼다: 파일 · 규칙 · 스킬 · 훅 · MCP. 선택은 왼쪽 2px 파란 인디케이터. 하단에 재스캔·종료 아이콘. 사이드바를 바꿔도 에디터는 그대로다 — 편집 중에도 목록을 탐색할 수 있다.
-- **사이드바**(300px) — 5종 모두 같은 4층 규격: 헤더 → 툴바(검색 + 필터 칩) → 컨텍스트 줄 → 그룹 헤더 → 28px 행. 행 왼쪽 3px 색띠가 출처다 (**파랑 전역 · 초록 프로젝트 · 보라 플러그인**). 행 오른쪽 메타는 태그 1개 또는 숫자 1개, 경고는 `⚠ 지연` 같은 짧은 조각 하나. 재렌더 시 스크롤 위치와 포커스 행을 유지한다.
-- **에디터**(가운데) — 어느 사이드바에서 무엇을 클릭하든 파일은 여기에 탭으로 열린다.
-- **인스펙터**(272px) — **선택한 것**에 관한 섹션만 보여준다. 아무것도 선택하지 않으면 안내 한 줄.
-- **상태바**(하단 28px) — 스캔 시각, Claude Code 버전(미확인이면 경고색), 오류 건수(클릭 시 인스펙터 상단에 목록), 우측에 현재 보고 있는 것의 한 줄 상태, 재스캔·종료 버튼.
-- 다크 기본, OS가 라이트 테마면 라이트. 900px 이하에서는 인스펙터가 에디터 아래로 내려간다.
+- **Activity bar** (56px, left) — five icons change the **sidebar content**: Files · Rules · Skills · Hooks · MCP. The selection is a 2px blue indicator on the left. Rescan and Quit icons sit at the bottom. Changing the sidebar leaves the editor alone — you can browse lists while editing.
+- **Sidebar** (300px) — all five share the same four-layer shape: header → toolbar (search + filter chips) → context row → group header → 28px rows. The 3px color stripe on the left of a row is its origin (**blue global · green project · purple plugin**). The meta on the right of a row is one tag or one number, and a warning is one short fragment like `⚠ lazy`. Scroll position and focused row survive a re-render.
+- **Editor** (center) — whatever you click in whichever sidebar, the file opens here as a tab.
+- **Inspector** (272px) — shows only the sections about **what you selected**. With nothing selected, one line of guidance.
+- **Status bar** (28px, bottom) — scan time, Claude Code version (warning color if unconfirmed), error count (click for the list at the top of the inspector), a one-line state of whatever you are looking at on the right, and the Rescan / Quit buttons.
+- Dark by default, light if the OS theme is light. Below 900px the inspector moves under the editor.
 
-## 사이드바 5종
+## The five sidebars
 
-### 파일 (탐색기)
+### Files (explorer)
 
-전역 · 프로젝트 · 플러그인 3그룹의 파일 트리.
+A file tree of three groups: global · project · plugin.
 
-- **전역** — `~/.claude/CLAUDE.md`, `rules/*.md`, `settings.json`·`settings.local.json`, `skills/`, `agents/`, `commands/`.
-- **프로젝트** — `~/.claude.json` 에 등록된 프로젝트 각각. 루트 `CLAUDE.md`·`CLAUDE.local.md`, 하위 폴더 `CLAUDE.md`(`⚠ 지연` = 그 폴더에서 작업할 때만 로드됨), `.claude/rules`·`settings`·`skills`·`agents`·`commands`.
-- **플러그인** — `installed_plugins.json` 기준. `plugin.json`, 스킬, 커맨드. 꺼진 플러그인은 흐리게 + `OFF` 태그.
+- **Global** — `~/.claude/CLAUDE.md`, `rules/*.md`, `settings.json` and `settings.local.json`, `skills/`, `agents/`, `commands/`.
+- **Project** — each project registered in `~/.claude.json`. Root `CLAUDE.md` and `CLAUDE.local.md`, subfolder `CLAUDE.md` (`⚠ lazy` = loaded only when you work in that folder), `.claude/rules`, `settings`, `skills`, `agents`, `commands`.
+- **Plugin** — based on `installed_plugins.json`. `plugin.json`, skills, commands. Disabled plugins are dimmed with an `OFF` tag.
 
-행 규칙: 파일 행은 `개인` 또는 `팀 공유` 태그 하나(git 추적 여부. `*.local.*` 은 추적돼도 개인). 폴더·프로젝트 행은 하위 파일 수. 프로젝트 이름을 클릭하면 선택되면서 접혀 있던 하위 항목이 펼쳐진다(닫기는 화살표). 경로가 사라진 프로젝트는 흐리게 + `경로 없음`.
+Row rules: a file row carries one tag, `personal` or `team-shared` (whether git tracks it; `*.local.*` stays personal even when tracked). Folder and project rows show the number of files under them. Clicking a project name selects it and expands its collapsed children (the arrow closes them). Projects whose path is gone are dimmed with `path missing`.
 
-툴바: `파일·프로젝트 검색`(이름·경로 부분 일치, 매칭 행과 그 조상만 남기고 접힘 무시), `팀 공유` 칩(git 추적 파일만).
+Toolbar: `Search files and projects` (substring match on name and path; only matching rows and their ancestors remain, folding ignored), and the `Shared` chip (git-tracked files only).
 
-### 규칙 (적용 체인)
+### Rules (effective chain)
 
-파일 사이드바에서 프로젝트를 고르면, **그 프로젝트에서 Claude Code가 실제로 읽는 CLAUDE.md 계열 파일을 적용 순서대로** 보여준다. 순번 원이 순서고, 아래가 위를 덮어쓴다.
+Pick a project in the Files sidebar and this shows **the CLAUDE.md-family files Claude Code actually reads in that project, in the order they apply**. The numbered circle is the order, and later entries override earlier ones.
 
-- 그룹: `전역` / `프로젝트 · <이름>`.
-- 파일 행 아래에 `##` 이상 헤딩이 들여쓴 하위 행으로 붙는다. 클릭하면 에디터가 그 줄로 이동해 잠시 강조한다. 전역과 프로젝트에 같은 제목이 있으면 `⚠ 충돌`.
-- 컨텍스트 줄에서 프로젝트를 바로 바꿀 수 있다.
-- 툴바 검색창에 제목을 넣고 Enter(또는 `⇄ 비교` 칩)를 누르면 **프로젝트 간 비교 탭**이 열린다. 아래 [섹션](#섹션-claudemd-구조) 참고.
+- Groups: `Global` / `Project · <name>`.
+- Headings of `##` or deeper hang under the file row as indented child rows. Click one and the editor jumps to that line and highlights it briefly. If the same title exists globally and in the project, you get `⚠ conflict`.
+- The context row lets you switch projects directly.
+- Type a title into the toolbar search box and press Enter (or the `⇄ compare` chip) to open a **cross-project compare tab**. See [Sections](#sections-claudemd-structure) below.
 
-### 스킬·에이전트·커맨드
+### Skills, agents, commands
 
-전역 · 이 프로젝트 · 플러그인별 그룹. 행은 이름 + 종류 태그(`스킬`/`에이전트`/`커맨드`) + ON/OFF 스위치.
+Groups for global · this project · each plugin. A row is a name + a kind tag (`skill` / `agent` / `command`) + an ON/OFF switch.
 
-- 툴바: `이름·설명 검색`(frontmatter `description` 포함), 종류 칩 3개.
-- 플러그인 그룹 헤더 오른쪽 스위치가 **플러그인 단위** ON/OFF다.
-- 컨텍스트 줄은 토글 저장 대상 파일을 보여준다.
+- Toolbar: `Search name and description` (includes the frontmatter `description`), plus three kind chips.
+- The switch to the right of a plugin group header is a **per-plugin** ON/OFF.
+- The context row shows which file the toggle saves to.
 
-### 훅
+### Hooks
 
-`settings*.json` 의 훅을 **세션 이벤트 순서**로 그룹화(SessionStart → … → Stop). 행은 매처 이름(없으면 `(전체)`), 첫 명령의 파일명(mono), 명령 수. `*` 매처와 중복 발화하면 `⚠ 중복`. 색띠가 출처(전역 / 프로젝트 / 플러그인).
+The hooks in `settings*.json`, grouped **in session event order** (SessionStart → … → Stop). A row shows the matcher name (`(all)` when there is none), the file name of the first command (mono), and the command count. If it fires twice together with a `*` matcher, `⚠ duplicate`. The color stripe is the origin (global / project / plugin).
 
-- 툴바: `이벤트·매처·명령 검색`, 출처 칩 3개(기본 전부 ON).
-- 행을 클릭하면 출처 `settings.json` 이 에디터에 열리고 인스펙터에 훅 상세가 뜬다. 플러그인 출처는 열 파일이 없다.
+- Toolbar: `Search event, matcher, command`, plus three origin chips (all ON by default).
+- Clicking a row opens the origin `settings.json` in the editor and shows hook details in the inspector. Plugin-origin hooks have no file to open.
 
 ### MCP
 
-출처별 그룹(전역 `settings.json` / 프로젝트 `.mcp.json` / 플러그인). 행은 서버 이름 + 전송 방식(`command` / `url` / `설정 없음`). 프로젝트를 선택했으면 그 프로젝트의 `.mcp.json` 만, 아니면 모든 프로젝트.
+Grouped by origin (global `settings.json` / project `.mcp.json` / plugin). A row shows the server name and the transport (`command` / `url` / `no config`). If a project is selected, only that project's `.mcp.json`; otherwise all projects.
 
-- 툴바: `서버 이름 검색`, `command`/`url` 칩(둘 다 꺼짐 = 전체).
-- 클릭하면 원문 파일이 열리고 인스펙터에 해당 서버 설정 JSON만 표시된다.
+- Toolbar: `Search server name`, plus `command` / `url` chips (both off = all).
+- Clicking opens the source file and shows only that server's config JSON in the inspector.
 
-## 에디터
+## Editor
 
-- **탭** — 최근 6개. 이름·출처가 같은 탭이 여럿이면(`SKILL.md` 등) `폴더/SKILL.md` 로 구분해 표시한다. 재스캔 후 사라진 파일의 탭은 닫힌다.
-- **경로 줄** — 전체 경로 + 우측 버튼: `편집`, `모두 접기`, `모두 펼치기`, 팀 공유 파일이면 `팀 공유 · git` 표시. 플러그인 소속 파일은 `읽기 전용 (플러그인)`.
-- **원문 뷰** — 줄번호 + 본문. 헤딩 줄의 줄번호 칸에 접기 토글. 2,000줄 이후는 한 덩어리로 표시한다.
-- **편집 모드** — `검증` `저장` `취소` 툴바(각 버튼에 툴팁), 편집 도우미 프롬프트 칸, textarea, 검증 결과 목록. `Ctrl+S` 저장. 팀 공유 파일이면 "커밋하면 팀 전체에 적용됨" 경고 줄. 저장하지 않고 탭을 닫거나 브라우저를 닫으면 확인 창.
-- **비교 탭** — `비교: <제목>` 가상 탭. 읽기 전용. 각 카드 헤더를 클릭하면 그 파일의 해당 줄로 이동.
+- **Tabs** — the last 6. When several tabs share a name and origin (`SKILL.md` and friends), they are shown as `folder/SKILL.md`. Tabs for files that disappeared after a rescan are closed.
+- **Path row** — the full path plus buttons on the right: `Edit`, `Collapse all`, `Expand all`, and `Shared · git` for shared files. Files owned by a plugin show `Read-only (plugin)`.
+- **Source view** — line numbers plus body. A fold toggle sits in the line-number column of heading lines. Everything past line 2,000 is shown as one block.
+- **Edit mode** — a `Validate` `Save` `Cancel` toolbar (each with a tooltip), the edit-assistant prompt box, a textarea, and the validation result list. `Ctrl+S` saves. For team-shared files there is a "committing this applies it to the whole team" warning row. Closing the tab or the browser with unsaved changes asks for confirmation.
+- **Compare tab** — a `Compare: <title>` virtual tab. Read-only. Click a card header to jump to that line in that file.
 
-## 인스펙터와 상태바
+## Inspector and status bar
 
-인스펙터는 선택 대상에 따라 다음 섹션만 보여준다.
+The inspector shows only these sections, depending on what is selected.
 
-| 선택 | 섹션 |
+| Selection | Sections |
 |---|---|
-| 파일 | `속성`(범위·출처·공유·크기·수정·줄바꿈·BOM·섹션 수) → `함께 적용됨`(N) → `충돌`(N) |
-| 스킬·에이전트·커맨드 | `항목`(종류·출처·설명·값 출처) → `이 프로젝트에서`(스위치·범위·저장 대상·경고) → `속성` |
-| 훅 | `훅`(이벤트·매처·출처·명령 수) → `명령` → `같은 이벤트의 다른 훅` |
-| MCP 서버 | `서버`(출처·전송·환경변수 수) → `설정`(JSON) |
-| 프로젝트만 | `프로젝트`(경로·스캔 범위·완결성·git·토글 수) → `함께 적용됨` → `충돌` → `이 프로젝트의 훅` |
-| 비교 탭 | `속성`(비교 제목·매치 수) |
+| File | `Properties` (scope · origin · sharing · size · modified · line endings · BOM · section count) → `Applied together` (N) → `Conflicts` (N) |
+| Skill / agent / command | `Item` (kind · origin · description · value source) → `In this project` (switch · scope · save target · warnings) → `Properties` |
+| Hook | `Hook` (event · matcher · origin · command count) → `Commands` → `Other hooks on the same event` |
+| MCP server | `Server` (origin · transport · env var count) → `Config` (JSON) |
+| Project only | `Project` (path · scan scope · completeness · git · toggle count) → `Applied together` → `Conflicts` → `Hooks in this project` |
+| Compare tab | `Properties` (compared title · match count) |
 
-상태바 우측 문구는 뷰에 따라 바뀐다: `CLAUDE.md · 15줄`, `편집 중 · CLAUDE.md`, `3 / 5 · 아래가 위를 덮어씀`(규칙), `토글 저장 → settings.local.json`(스킬), 훅·MCP는 출처 파일명.
+The text on the right of the status bar changes per view: `CLAUDE.md · 15 lines`, `editing · CLAUDE.md`, `3 / 5 · later overrides earlier` (rules), `toggle saves → settings.local.json` (skills); for hooks and MCP it is the origin file name.
 
 ---
 
-## 기능 상세
+## Feature details
 
-### 스캔 범위와 규칙
+### Scan scope and rules
 
-- **프로젝트 목록**은 `~/.claude.json` 의 `projects` 키다. `C:/x` 와 `c:/x` 처럼 표기만 다른 같은 폴더는 하나로 합친다.
-- **CLAUDE.md 탐색**은 프로젝트 루트에서 깊이 8까지, 다음 폴더는 건너뛴다: `node_modules` `.git` `dist` `build` `target` `.venv` `venv` `__pycache__` `.next` `.nuxt` `out` `coverage`. 디렉터리 20,000개를 넘으면 중단하고 `일부만 스캔` 으로 표시한다.
-- **루트만 스캔**(`⚠ 루트만`)이 되는 경우: 홈 디렉터리 자체, 드라이브 루트, 다른 등록 프로젝트의 상위 폴더. 거대 트리를 훑지 않기 위해서다.
-- **팀 공유 여부**는 `git ls-files` 결과로 판정한다(프로젝트당 1회, 8개 병렬). git이 없거나 저장소가 아니면 전부 개인.
-- **적용 체인**(규칙 사이드바·`함께 적용됨`)은 전역 `CLAUDE.md` → 전역 `rules/*.md` → 프로젝트 루트 `CLAUDE.md` → `CLAUDE.local.md` → 하위 폴더 `CLAUDE.md`(지연) 순서다. `@경로` import 는 링크로만 검사하고 인라인 전개하지 않는다.
-- **훅**은 전역·프로젝트 `settings.json`/`settings.local.json` 과 플러그인 매니페스트에서 모은다.
-- **Claude Code 버전**은 `claude --version` 으로 읽는다. 실패하면 `버전 미확인` 으로 표시하고 토글 경고를 띄운다.
-- 스캔 오류(읽기 실패·JSON 파싱 실패 등)는 스캔을 중단시키지 않고 상태바 `오류 N건` 에 모인다.
+- **The project list** is the `projects` key of `~/.claude.json`. Paths that differ only in spelling, like `C:/x` and `c:/x`, are merged into one.
+- **CLAUDE.md discovery** walks up to depth 8 from the project root and skips these folders: `node_modules` `.git` `dist` `build` `target` `.venv` `venv` `__pycache__` `.next` `.nuxt` `out` `coverage`. Past 20,000 directories it stops and marks the project `partially scanned`.
+- **Root-only scan** (`⚠ root only`) happens for: the home directory itself, a drive root, and a parent folder of another registered project. This avoids walking huge trees.
+- **Team-shared status** is decided by `git ls-files` (once per project, 8 in parallel). Without git, or outside a repository, everything is personal.
+- **The effective chain** (Rules sidebar and `Applied together`) is global `CLAUDE.md` → global `rules/*.md` → project root `CLAUDE.md` → `CLAUDE.local.md` → subfolder `CLAUDE.md` (lazy). `@path` imports are checked as links only, never expanded inline.
+- **Hooks** are collected from global and project `settings.json` / `settings.local.json` and from plugin manifests.
+- **The Claude Code version** comes from `claude --version`. On failure it shows `version unconfirmed` and raises the toggle warning.
+- Scan errors (read failures, JSON parse failures, and so on) do not stop the scan; they collect under `N errors` in the status bar.
 
-### 편집·검증·저장·백업
+### Edit, validate, save, back up
 
-`검증`은 **저장하지 않고** 현재 textarea 내용을 규칙으로 검사한다. `저장`은 같은 검사를 자동으로 돌린 뒤 오류가 없을 때만 쓴다. 경고는 저장을 막지 않는다.
+`Validate` checks the current textarea content against the rules **without saving**. `Save` runs the same check automatically and writes only when there are no errors. Warnings do not block saving.
 
-| 규칙 | 수준 | 대상 | 내용 |
+| Rule | Level | Target | Content |
 |---|---|---|---|
-| V1 | 오류 | `*.json` | JSON 파싱 실패 (줄 번호 표시), 최상위가 객체가 아님 |
-| V2 | 오류 | `SKILL.md` · `agents/*.md` · `commands/*.md` | frontmatter 필수 키 `name`·`description` 누락 |
-| V3 | 오류 | `settings*.json` | 훅 `command` 의 스크립트 경로가 실존하지 않음. 환경변수가 섞인 경로는 건너뛰고, 실행은 하지 않는다 |
-| V4 | 오류 | 마크다운 | `@경로` import·상대 링크 대상이 실존하지 않음 |
-| V5 | 경고 | 적용 체인 | 여러 파일에 같은 제목의 섹션 (규칙 사이드바·인스펙터에 `충돌`) |
-| V6 | 경고 | `settings*.json` | 같은 이벤트에 `*` 매처와 구체 매처가 공존 → 중복 발화 |
-| V7 | — | 모든 저장 | 읽은 뒤 디스크의 파일이 바뀌었으면 저장을 거부(409)하고 `다시 읽기` 를 요구 |
+| V1 | error | `*.json` | JSON parse failure (with line number), top level is not an object |
+| V2 | error | `SKILL.md` · `agents/*.md` · `commands/*.md` | missing required frontmatter keys `name` and `description` |
+| V3 | error | `settings*.json` | the script path in a hook `command` does not exist. Paths containing environment variables are skipped, and nothing is executed |
+| V4 | error | markdown | the target of an `@path` import or a relative link does not exist |
+| V5 | warning | effective chain | sections with the same title in several files (shown as `Conflicts` in the Rules sidebar and the inspector) |
+| V6 | warning | `settings*.json` | a `*` matcher and a specific matcher coexist on the same event → duplicate firing |
+| V7 | — | every save | if the file on disk changed after it was read, the save is refused (409) and `Reload` is required |
 
-저장 동작:
+Save behavior:
 
-- 쓰기 전 원본 바이트를 `~/.claude/config-map/backups/<경로 sha1 앞 16자>/<UTC 시각>.bak` 으로 복사하고, 파일당 최근 **10개**만 남긴다.
-- 임시 파일에 쓴 뒤 원자적으로 교체한다. 원본의 줄바꿈(CRLF/LF)과 BOM 유무를 읽을 때 기억해 그대로 되돌려 쓴다.
-- 요청 본문은 1 MiB 까지.
-- 플러그인 캐시 안의 파일과 스캔 범위 밖의 경로는 저장을 거부한다(403).
+- Before writing, the original bytes are copied to `~/.claude/config-map/backups/<first 16 chars of the path sha1>/<UTC timestamp>.bak`, keeping only the **10** most recent per file.
+- The content is written to a temp file and swapped in atomically. The original line endings (CRLF/LF) and BOM presence are remembered at read time and restored on write.
+- Request bodies are capped at 1 MiB.
+- Files inside the plugin cache and paths outside the scan scope are refused (403).
 
-### 섹션 (CLAUDE.md 구조)
+### Sections (CLAUDE.md structure)
 
-마크다운 헤딩(`#`~`######`)으로 파일을 잘라 다룬다. 펜스 코드블록(``` / ~~~) 안의 `#` 는 헤딩이 아니고, 첫 헤딩 앞은 전문(preamble)이다. setext 헤딩(`===`·`---` 밑줄)은 인식하지 않는다.
+Files are sliced by markdown headings (`#`–`######`). A `#` inside a fenced code block (``` / ~~~) is not a heading, and everything before the first heading is the preamble. Setext headings (`===` / `---` underlines) are not recognized.
 
-- **접기** — 헤딩 줄번호 칸의 토글, 또는 경로 줄의 `모두 접기 / 모두 펼치기`. 접힘 상태는 저장·재읽기·재스캔 후에도 유지된다.
-- **섹션만 편집** — 헤딩 줄에 마우스를 올리면 나오는 `이 섹션 편집`. 그 섹션 줄만 textarea에 들어오고, 저장은 해당 줄 범위만 갈아 끼우므로 나머지 줄은 바이트 단위로 그대로다. 검증은 전문을 합성해 돌린다. 저장 중 디스크가 바뀌었으면(V7) 다시 읽은 뒤 같은 제목으로 범위를 다시 찾고, 못 찾으면 전체 편집으로 전환한다.
-- **충돌(V5)** — 규칙 사이드바 섹션 행의 `⚠ 충돌`, 인스펙터 `충돌` 섹션에서 파일별 본문을 나란히 펼쳐 본다.
-- **프로젝트 간 비교** — 제목이 **완전히 일치**하는 섹션을 전역·모든 프로젝트에서 모아 비교 탭으로 보여준다.
+- **Folding** — the toggle in the heading's line-number column, or `Collapse all / Expand all` in the path row. Fold state survives saving, reloading, and rescanning.
+- **Editing one section** — `Edit this section` appears when you hover a heading line. Only that section's lines go into the textarea, and saving swaps just that line range, so the remaining lines stay byte-identical. Validation runs against the synthesized whole document. If the disk changed mid-save (V7), the file is re-read, the range is found again by the same title, and if it cannot be found the editor falls back to whole-file editing.
+- **Conflicts (V5)** — `⚠ conflict` on a section row in the Rules sidebar, and the inspector's `Conflicts` section expands each file's body side by side.
+- **Cross-project compare** — sections whose titles match **exactly** are collected from the global config and every project into a compare tab.
 
-### 토글 (스킬·플러그인 ON/OFF)
+### Toggles (skills and plugins ON/OFF)
 
-Claude Code의 `skillOverrides` 와 `enabledPlugins` 설정을 UI에서 쓴다.
+The UI writes Claude Code's `skillOverrides` and `enabledPlugins` settings.
 
-- **스킬·커맨드** — 스킬 사이드바 행의 스위치(ON/OFF), 또는 항목을 열고 인스펙터 `이 프로젝트에서` 의 4단계 select: `on`(제한 없음) · `name-only`(이름만) · `user-invocable-only`(사용자 호출만) · `off`. 에이전트는 토글 대상이 아니다.
-- **플러그인** — 사이드바 그룹 헤더의 스위치. 플러그인 내부 스킬을 개별로 끌 수는 없다(플러그인 단위만).
-- **저장 대상** — 기본은 선택 프로젝트의 `.claude/settings.local.json`(개인). 인스펙터에서 `.claude/settings.json`(팀 공유)으로 바꿀 수 있고, 그러면 "커밋하면 팀 전체에 적용됨" 경고가 뜬다.
-- **값 출처** 배지 — 현재 값이 어디서 왔는지: `전역 설정` / `팀 설정` / `개인 설정`. 없으면 기본값. 병합 순서는 전역 → 팀 → 개인이다.
-- 파일이 없으면 만든다. 있으면 JSON을 **다시 직렬화**하므로 들여쓰기·키 순서 등 원본 포맷이 바뀔 수 있다. 기본값으로 되돌리면 키를 지우고, 빈 섹션은 제거한다. 백업은 편집과 같은 규칙.
-- 토글은 재스캔 없이 화면에 제자리 반영된다. 토글하려면 파일 사이드바에서 프로젝트를 먼저 선택해야 하며, 전역 토글은 지원하지 않는다.
+- **Skills and commands** — the switch (ON/OFF) on a Skills sidebar row, or open the item and use the four-step select under the inspector's `In this project`: `on` (no restriction) · `name-only` · `user-invocable-only` · `off`. Agents are not toggleable.
+- **Plugins** — the switch on the sidebar group header. Individual skills inside a plugin cannot be turned off separately (per-plugin only).
+- **Save target** — by default the selected project's `.claude/settings.local.json` (personal). The inspector can switch it to `.claude/settings.json` (team-shared), which raises the "committing this applies it to the whole team" warning.
+- **Value source** badge — where the current value came from: `global settings` / `team settings` / `personal settings`. Without one, it is the default. The merge order is global → team → personal.
+- If the file does not exist it is created. If it does, the JSON is **re-serialized**, so indentation, key order, and other formatting of the original may change. Returning to the default deletes the key, and empty sections are removed. Backups follow the same rules as editing.
+- Toggles are reflected in place without a rescan. To toggle anything you must first select a project in the Files sidebar; global toggles are not supported.
 
-### 편집 도우미 (Claude CLI)
+### Edit assistant (Claude CLI)
 
-편집 모드(전체·섹션) 툴바 아래 프롬프트 칸에 수정 지시를 적으면, 서버가 **설치된 Claude Code CLI**를 호출해 수정본을 받아 온다.
+Write an instruction in the prompt box under the edit-mode toolbar (whole file or section) and the server calls your **installed Claude Code CLI** to fetch a revision.
 
-- 호출은 `claude -p --tools "" --output-format json --no-session-persistence` 다. **도구를 비워** 파일 접근·명령 실행을 막고, 문서 본문과 지시는 stdin으로만 넘긴다. 로그인된 구독을 그대로 쓰므로 API 키가 필요 없다.
-- 서버는 이 기능에서 파일을 읽거나 쓰지 않는다. 본문은 화면의 textarea 내용이 전부다.
-- Enter 로 요청, Shift+Enter 는 줄바꿈. 모델은 `기본 / sonnet / opus / haiku`. 진행 중엔 경과 초와 `취소`.
-- 결과는 **unified diff 미리보기**로 먼저 보여준다. `적용`을 누르면 textarea에 들어가고 저장은 기존 검증·백업 흐름을 탄다. `버리기`는 아무것도 바꾸지 않는다. 상태 줄에 호출당 비용(USD)이 표시된다.
-- 작업 폴더를 `~/.claude/config-map/` 으로 잡아 프로젝트 CLAUDE.md 가 프롬프트에 딸려 들어가지 않게 한다. 전역 `~/.claude/CLAUDE.md` 는 CLI가 항상 읽으므로 비용에 포함된다.
-- 시간 초과 180초, 동시 실행 3개. CLI 가 없으면 안내 문구만 뜨고 나머지 기능은 그대로 동작한다.
+- The call is `claude -p --tools "" --output-format json --no-session-persistence`. **Tools are empty**, blocking file access and command execution, and the document body plus the instruction are passed only through stdin. It uses your logged-in subscription, so no API key is needed.
+- The server neither reads nor writes files in this feature. The body is exactly what is in the on-screen textarea.
+- Enter sends, Shift+Enter inserts a newline. Models are `default / sonnet / opus / haiku`. While running you see the elapsed seconds and `Cancel`.
+- The result is shown first as a **unified diff preview**. `Apply` puts it into the textarea, and saving goes through the usual validation and backup flow. `Discard` changes nothing. The status line shows the cost per call (USD).
+- The working directory is `~/.claude/config-map/` so that project CLAUDE.md files do not get dragged into the prompt. The global `~/.claude/CLAUDE.md` is always read by the CLI, so it counts toward the cost.
+- Timeout 180 seconds, 3 concurrent runs. Without the CLI you only get an informational message, and everything else keeps working.
 
 ---
 
-## 이 도구가 읽고 쓰는 파일
+## Files this tool reads and writes
 
-**읽기** (스캔)
+**Reads** (scan)
 
-- `~/.claude.json` — 프로젝트 목록, 전역 MCP 서버
+- `~/.claude.json` — project list, global MCP servers
 - `~/.claude/CLAUDE.md`, `~/.claude/rules/*.md`, `~/.claude/settings.json`, `~/.claude/settings.local.json`
 - `~/.claude/skills/**`, `~/.claude/agents/*.md`, `~/.claude/commands/*.md`
-- `~/.claude/plugins/installed_plugins.json` 과 각 플러그인 캐시의 `plugin.json`·스킬·커맨드
-- 각 프로젝트의 `CLAUDE.md`, `CLAUDE.local.md`, 하위 폴더 `CLAUDE.md`, `.claude/**`, `.mcp.json`
-- `claude --version`, `git ls-files` 실행 결과
+- `~/.claude/plugins/installed_plugins.json` and each plugin cache's `plugin.json`, skills, and commands
+- Each project's `CLAUDE.md`, `CLAUDE.local.md`, subfolder `CLAUDE.md`, `.claude/**`, `.mcp.json`
+- The output of `claude --version` and `git ls-files`
 
-**쓰기**
+**Writes**
 
-- 사용자가 UI에서 저장한 파일 (그 파일 자리에)
-- 토글이 쓰는 선택 프로젝트의 `.claude/settings.local.json` 또는 `.claude/settings.json` (없으면 생성)
-- `~/.claude/config-map/backups/…` — 위 파일들의 쓰기 전 백업
-- `~/.claude/config-map/server.json` — 실행 중 서버 정보 (종료 시 삭제)
+- Files you saved in the UI (in place)
+- The selected project's `.claude/settings.local.json` or `.claude/settings.json` that toggles write to (created if missing)
+- `~/.claude/config-map/backups/…` — pre-write backups of the files above
+- `~/.claude/config-map/server.json` — running server info (deleted on quit)
 
-그 밖의 파일은 쓰지 않는다. 특히 플러그인 캐시(`~/.claude/plugins/cache/...`)에는 아무것도 쓰지 않는다 — 업데이트 시 통째로 교체되는 경로다.
+Nothing else is written. In particular, nothing is ever written into the plugin cache (`~/.claude/plugins/cache/...`) — that path is replaced wholesale on update.
 
-## 보안
+## Security
 
-- `127.0.0.1` 에만 바인딩한다. 같은 PC의 다른 사용자나 네트워크에서는 접근할 수 없다.
-- 모든 POST 는 `Origin` 헤더가 서버 자신의 주소(`http://127.0.0.1:<port>` 또는 `localhost`)일 때만 받는다. 다른 사이트가 브라우저를 통해 저장·토글·종료를 시키는 것을 막는다.
-- 요청 본문 1 MiB 상한. 저장 대상은 스캔 범위 안의 경로만 허용하고, 플러그인 캐시는 읽기 전용.
-- UI 는 모든 텍스트를 `textContent` 로만 넣는다(innerHTML 미사용). 설정 파일 내용이 스크립트로 실행될 여지가 없다.
-- 편집 도우미의 CLI 호출은 도구 없이(`--tools ""`) 실행되고, 세션을 남기지 않는다(`--no-session-persistence`).
-- 훅 스크립트 경로 검사(V3)는 존재만 확인하고 실행하지 않는다.
+- Binds to `127.0.0.1` only. Other users on the same PC and anything on the network cannot reach it.
+- Every POST is accepted only when the `Origin` header is the server's own address (`http://127.0.0.1:<port>` or `localhost`). This stops another site from using your browser to save, toggle, or quit.
+- Request bodies are capped at 1 MiB. Save targets are limited to paths inside the scan scope, and the plugin cache is read-only.
+- The UI inserts all text with `textContent` only (no innerHTML). Config file content has no way to run as script.
+- The edit assistant's CLI call runs without tools (`--tools ""`) and leaves no session (`--no-session-persistence`).
+- The hook script path check (V3) only confirms existence; it never executes anything.
 
 ## HTTP API
 
-UI 가 쓰는 엔드포인트다. 모두 `127.0.0.1` 로컬 전용이며, POST 는 Origin 검사를 거친다.
+The endpoints the UI uses. All of them are `127.0.0.1` local only, and POSTs go through the Origin check.
 
-| 메서드 | 경로 | 설명 |
+| Method | Path | Description |
 |---|---|---|
 | GET | `/` | UI |
-| GET | `/ui/<path>` | 정적 파일 (`.css`/`.js` 만, `no-store`) |
+| GET | `/ui/<path>` | static files (`.css` / `.js` only, `no-store`) |
 | GET | `/api/ping` | `{ok, pid, version}` |
-| GET | `/api/scan` | 전체 스캔 결과 (매 호출마다 새로 스캔) |
-| GET | `/api/file?path=` | 파일 원문 + 메타(크기·mtime·CRLF·BOM·섹션) |
-| GET | `/api/rules?project=` | 적용 체인 + 섹션 충돌 |
-| GET | `/api/effective?project=` | 적용 체인 (구 형식) |
-| GET | `/api/sections?path=` | 섹션 목록 |
-| GET | `/api/compare?title=` | 같은 제목 섹션의 프로젝트 간 비교 |
+| GET | `/api/scan` | full scan result (a fresh scan on every call) |
+| GET | `/api/file?path=` | file source + meta (size, mtime, CRLF, BOM, sections) |
+| GET | `/api/rules?project=` | effective chain + section conflicts |
+| GET | `/api/effective?project=` | effective chain (old format) |
+| GET | `/api/sections?path=` | section list |
+| GET | `/api/compare?title=` | cross-project comparison of same-title sections |
 | POST | `/api/validate` | `{path, text}` → `{issues}` |
-| POST | `/api/save` | `{path, text, expected_mtime}` → 저장 (백업 포함) |
-| POST | `/api/save-range` | `{path, start, end, text, expected_mtime}` → 줄 범위 치환 |
-| POST | `/api/toggle` | `{project, section, key, value, target}` → `skillOverrides`/`enabledPlugins` 갱신 |
+| POST | `/api/save` | `{path, text, expected_mtime}` → save (with backup) |
+| POST | `/api/save-range` | `{path, start, end, text, expected_mtime}` → replace a line range |
+| POST | `/api/toggle` | `{project, section, key, value, target}` → update `skillOverrides` / `enabledPlugins` |
 | POST | `/api/assist` | `{path, text, instruction, range?, model?}` → 202 `{id}` |
-| GET | `/api/assist?id=` | 작업 상태 `{status, result?, diff?, changed?, error?, cost_usd?}` |
-| POST | `/api/assist-cancel` | `{id}` → 실행 중 작업 중단 |
-| POST | `/api/shutdown` | 서버 종료 |
+| GET | `/api/assist?id=` | job status `{status, result?, diff?, changed?, error?, cost_usd?}` |
+| POST | `/api/assist-cancel` | `{id}` → stop a running job |
+| POST | `/api/shutdown` | stop the server |
 
-상태 코드: `400` 필드 오류 · `403` Origin 불일치 또는 허용되지 않는 경로 · `404` 없음 · `409` 디스크 변경(V7) · `413` 본문 초과 · `422` 검증 오류로 저장 거부 · `429` 도우미 동시 실행 초과 · `503` Claude CLI 없음.
+Status codes: `400` field error · `403` Origin mismatch or disallowed path · `404` not found · `409` disk changed (V7) · `413` body too large · `422` save refused on validation errors · `429` too many concurrent assistant runs · `503` no Claude CLI.
 
-## 문제 해결
+## Troubleshooting
 
-| 증상 | 원인 · 조치 |
+| Symptom | Cause · fix |
 |---|---|
-| `/config-map` → `Unknown command` | 설치 직후 같은 세션. 새 세션을 연다 |
-| Python 설치 안내만 뜨고 끝남 | 3.11 이상 Python 이 PATH 에 없다. Windows Store 의 가짜 `python` 별칭은 걸러진다. 설치 후 새 터미널 |
-| 브라우저에 옛 화면이 보임 | 플러그인을 재설치했는데 옛 서버가 살아 있다. UI 의 `종료` 후 `/config-map` 을 다시 실행하거나 강력 새로고침 |
-| 저장이 `409` 로 막힘 | 읽은 뒤 다른 프로그램이 파일을 바꿨다. `다시 읽기` 후 다시 편집 |
-| 저장이 `422` 로 막힘 | 검증 오류(V1~V4). 목록의 줄 번호를 보고 고친다. 경고(V5·V6)는 저장을 막지 않는다 |
-| 프로젝트가 `루트만` 으로 표시 | 홈·드라이브 루트·다른 프로젝트의 상위 폴더. 하위 폴더 CLAUDE.md 는 스캔하지 않는다 |
-| 프로젝트가 `일부만 스캔` | 디렉터리 20,000개 상한 초과. 제외 폴더 안에 두거나 하위 프로젝트로 나눠 등록 |
-| `Claude Code 버전 미확인` | `claude --version` 실패. 토글은 되지만 실제 적용 여부는 보장하지 못한다 |
-| 편집 도우미 `claude CLI not found` | Claude Code CLI 가 PATH 에 없다. 설치·로그인 후 서버 재시작 |
-| 편집 도우미가 본문 외 설명을 붙임 | diff 미리보기에서 확인하고 `버리기`. 지시를 더 구체적으로 |
-| Windows 에서 콘솔 한글이 깨짐 | cp949 콘솔 문제. 파일과 UI 는 UTF-8 로 정상 |
+| `/config-map` → `Unknown command` | Same session as the install. Open a new session |
+| Only the Python install message appears | No Python 3.11+ on PATH. The Windows Store's fake `python` alias is filtered out. Install it, then use a new terminal |
+| The browser shows an old screen | You reinstalled the plugin but the old server is still alive. Use the UI's `Quit` and run `/config-map` again, or hard-refresh |
+| A save is blocked with `409` | Another program changed the file after it was read. `Reload`, then edit again |
+| A save is blocked with `422` | Validation errors (V1–V4). Fix them using the line numbers in the list. Warnings (V5, V6) do not block saving |
+| A project shows `root only` | Home, a drive root, or a parent folder of another project. Subfolder CLAUDE.md files are not scanned |
+| A project shows `partially scanned` | Over the 20,000 directory cap. Move it under an excluded folder, or register the subprojects separately |
+| `Claude Code version unconfirmed` | `claude --version` failed. Toggles still work, but whether they actually apply cannot be guaranteed |
+| Edit assistant `claude CLI not found` | The Claude Code CLI is not on PATH. Install it, log in, then restart the server |
+| The edit assistant adds explanations around the body | Check the diff preview and press `Discard`. Make the instruction more specific |
+| Korean text is garbled in a Windows console | A cp949 console issue. Files and the UI are fine in UTF-8 |
 
-## 개발
+## Development
 
 ```
 server/
-  web_server.py   HTTP 서버·라우팅 (ThreadingHTTPServer, 표준 라이브러리)
-  core.py         파사드 — 아래 4모듈을 재수출
-  common.py       공용 헬퍼·상수·오류 수집·frontmatter 파서
-  scan.py         F1/F2 스캔 (프로젝트·플러그인·훅·MCP·적용 체인)
-  edit.py         F4 검증 · F5 저장/백업 · F7 토글
-  sections.py     F8 섹션 파싱·충돌·비교·범위 치환
-  assist.py       F9 편집 도우미 (Claude CLI 호출)
+  web_server.py   HTTP server and routing (ThreadingHTTPServer, standard library)
+  core.py         facade — re-exports the four modules below
+  common.py       shared helpers, constants, error collection, frontmatter parser
+  scan.py         F1/F2 scan (projects, plugins, hooks, MCP, effective chain)
+  edit.py         F4 validation · F5 save/backup · F7 toggles
+  sections.py     F8 section parsing, conflicts, comparison, range replacement
+  assist.py       F9 edit assistant (Claude CLI call)
   ui/
-    index.html    마크업
-    app.css       스타일 (다크 기본 · 라이트 오버라이드)
-    js/core.js    상태(S)·헬퍼·공용 부품(행·그룹·태그·스위치·아이콘)
-    js/sidebar.js 액티비티 바 + 사이드바 5종
-    js/editor.js  탭·원문·접기·편집·비교·편집 도우미
-    js/inspector.js 인스펙터·토글 반영
-    js/main.js    스캔 로드·상태바·종료·부트
-  tests/          unittest (helpers.py 의 FakeHome 으로 격리 홈 생성)
-commands/config-map.md   슬래시 커맨드
+    index.html    markup
+    app.css       styles (dark by default · light override)
+    js/i18n.js    Korean-keyed dictionary + `t()` / `tMsg()` (loaded before core.js)
+    js/core.js    state (S), helpers, shared parts (rows, groups, tags, switches, icons)
+    js/sidebar.js activity bar + the five sidebars
+    js/editor.js  tabs, source, folding, editing, comparison, edit assistant
+    js/inspector.js inspector and toggle reflection
+    js/main.js    scan loading, status bar, quit, boot
+  tests/          unittest (isolated homes via FakeHome in helpers.py)
+commands/config-map.md   slash command
 .claude-plugin/plugin.json
 ```
 
-테스트:
+Tests:
 
 ```bash
 python -m unittest discover -s server/tests
 ```
 
-격리 홈으로 서버를 띄워 실제 설정을 건드리지 않고 확인:
+Run the server against an isolated home so your real config is untouched:
 
 ```bash
 CLAUDE_CONFIG_MAP_HOME=/path/to/fixture-home python server/web_server.py --no-browser --port 8802
 ```
 
-원칙:
+Principles:
 
-- 표준 라이브러리만. 프런트는 프레임워크·빌드 없이 vanilla JS, DOM 은 `textContent` 전용.
-- 비동기 응답은 세대 번호(`sseq`/`fseq`/`eseq`)로 가드해 늦게 도착한 응답을 버린다.
-- 브랜치는 `develop` 기준 feature 브랜치 → `--no-ff` 병합 → 태그(`vX.Y.Z`) → 브랜치 삭제. 버전은 `plugin.json` 과 `web_server.py` 의 `VERSION` 두 곳.
+- Standard library only. The frontend is vanilla JS with no framework and no build step, and the DOM is `textContent` only.
+- UI strings go through `t()`; `server/ui/js/i18n.js` holds one Korean-keyed dictionary (the Korean source text is the key, so Korean mode is lossless) plus `tMsg()` for the Korean messages the server produces.
+- Async responses are guarded by generation numbers (`sseq` / `fseq` / `eseq`) so late arrivals are dropped.
+- Branching: feature branch off `develop` → `--no-ff` merge → tag (`vX.Y.Z`) → delete the branch. The version lives in two places, `plugin.json` and `VERSION` in `web_server.py`.
 
-## 알려진 제한
+## Known limits
 
-- 검증된 OS 는 Windows 11 뿐이다 (47개 프로젝트 첫 스캔 3.4~4.6초, 재스캔 2.7~2.9초, 2026-09-10 실측). macOS·Linux 는 경로 처리상 동작해야 하지만 실측하지 않았다.
-- 훅 폼 편집기는 없다. `settings.json` 원문 편집 + V3·V6 검사로 대체한다.
-- 섹션 삭제·순서 변경은 없다. 편집 모드에서 직접 고친다.
-- MCP 도구(Claude 에서 이 도구를 호출하는 방향)는 없다.
-- `@import` 는 존재만 검사하고 전개하지 않는다. setext 헤딩은 섹션으로 보지 않는다.
-- 스킬 토글이 실제로 적용되는지는 Claude Code 버전에 달려 있다. 이 도구는 설정 파일만 쓴다.
-- Windows 에서 `test_web_server` 일부가 소켓 종료 타이밍(WinError 10053)으로 간헐 실패한다. 재실행하면 통과한다.
+- The only verified OS is Windows 11 (47 projects: first scan 3.4–4.6 s, rescan 2.7–2.9 s, measured 2026-09-10). macOS and Linux should work given the path handling, but were not measured.
+- There is no hook form editor. Editing `settings.json` directly plus the V3 and V6 checks stands in for it.
+- There is no section deletion or reordering. Fix it directly in edit mode.
+- There is no MCP tool (the direction where Claude calls this tool).
+- `@import` is only checked for existence, never expanded. Setext headings are not treated as sections.
+- Whether a skill toggle actually applies depends on the Claude Code version. This tool only writes the settings file.
+- On Windows, part of `test_web_server` fails intermittently on socket shutdown timing (WinError 10053). Rerunning passes.

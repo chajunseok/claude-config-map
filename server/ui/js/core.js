@@ -68,7 +68,7 @@ function spliceLines(text, start, end, newText){
   Array.prototype.splice.apply(lines, args);
   return lines.join("\n");
 }
-function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
+function retryBtn(fn){ var b = el("button","linkbtn", t("다시 시도")); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";
 
@@ -192,7 +192,7 @@ async function getJSON(url){
   var r = await fetch(url), b=null;
   try{ b = await r.json(); }catch(e){}
   if(!r.ok) throw new Error((b&&b.error)||("HTTP "+r.status));
-  if(b==null) throw new Error("응답을 읽지 못했습니다");
+  if(b==null) throw new Error(t("응답을 읽지 못했습니다"));
   return b;
 }
 // 편집용 POST: 상태코드로 분기해야 하므로 throw 하지 않고 {status, ok, body} 를 준다
@@ -379,10 +379,11 @@ function collect(){
 }
 // 출처 섹션 — collect() 의 origin 문자열에서 되읽는다 (collect 는 그대로 둔다)
 function cardSrc(c){
-  if(c.origin === "전역") return {key:"g", label:"전역", rank:0};
-  if(c.origin === "프로젝트") return {key:"p", label:"이 프로젝트", rank:1};
+  // origin 값(내부 식별자)은 그대로 비교하고, label 만 표시용으로 번역한다
+  if(c.origin === "전역") return {key:"g", label:t("전역"), rank:0};
+  if(c.origin === "프로젝트") return {key:"p", label:t("이 프로젝트"), rank:1};
   var nm = c.origin.indexOf("플러그인:") === 0 ? c.origin.slice(5) : c.origin;
-  return {key:"pl:"+nm, label:"플러그인 "+nm, rank:2, plugin:nm};
+  return {key:"pl:"+nm, label:t("플러그인 {n}", {n:nm}), rank:2, plugin:nm};
 }
 function cardMatch(c){
   if(!S.cardq.kinds[c.kind]) return false;
@@ -400,14 +401,14 @@ function hookCmds(h){
 }
 function hookSource(src){
   src = String(src || "");
-  if(src.indexOf("global:") === 0) return {cls:"global", label:"전역 · "+src.slice(7)};
-  if(src.indexOf("plugin:") === 0) return {cls:"plugin", label:"플러그인 · "+src.slice(7)};
+  if(src.indexOf("global:") === 0) return {cls:"global", label:t("전역 · {n}", {n:src.slice(7)})};
+  if(src.indexOf("plugin:") === 0) return {cls:"plugin", label:t("플러그인 · {n}", {n:src.slice(7)})};
   if(src.indexOf("project:") === 0){
     var rest = src.slice(8), i = rest.lastIndexOf(":");
-    return i > 0 ? {cls:"project", label:"프로젝트 · "+rest.slice(0,i)+" · "+rest.slice(i+1)}
-                 : {cls:"project", label:"프로젝트 · "+rest};
+    return i > 0 ? {cls:"project", label:t("프로젝트 · {p} · {f}", {p:rest.slice(0,i), f:rest.slice(i+1)})}
+                 : {cls:"project", label:t("프로젝트 · {n}", {n:rest})};
   }
-  return {cls:"", label:src || "출처 미상"};
+  return {cls:"", label:src || t("출처 미상")};
 }
 function groupHooks(hooks){
   // 이벤트명이 constructor/__proto__ 여도 안전하도록 프로토타입 없는 객체
