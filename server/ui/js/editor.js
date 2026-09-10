@@ -26,7 +26,6 @@ function closeTab(path){
 function renderTabstrip(){
   var strip = clear(document.getElementById("tabstrip"));
   strip.setAttribute("role","tablist");
-  var path = clear(document.getElementById("pathline"));
   if(!S.tabs.length) strip.appendChild(el("div","tab empty","열린 파일 없음"));
   S.tabs.forEach(function(t){
     var d = el("div","tab"+(t.path === S.filePath ? " act" : ""));
@@ -45,8 +44,25 @@ function renderTabstrip(){
     d.appendChild(x);
     strip.appendChild(d);
   });
-  path.textContent = S.filePath || "";
+  renderPathline();
 }
+/* 경로 줄 — 경로 + 오른쪽 읽기 모드 툴바 (편집 모드 툴바는 #panel 안 sticky 유지) */
+function renderPathline(){
+  var bar = clear(document.getElementById("pathline"));
+  bar.appendChild(el("span","pp", S.filePath || ""));
+  if(!S.filePath || isCompare(S.filePath)) return;
+  if(S.edit && S.edit.path === S.filePath) return;
+  if(!S.file) return;
+  if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint","읽기 전용 (플러그인)"));
+  else bar.appendChild(ebtn("편집", function(){ startEdit(); }));
+  if(keys(headMap()).length){
+    bar.appendChild(ebtn("모두 접기", function(){ foldAll(true); }));
+    bar.appendChild(ebtn("모두 펼치기", function(){ foldAll(false); }));
+  }
+  var m = S.meta[S.filePath] || {};
+  if(m.shared) bar.appendChild(el("span","hint","팀 공유 · git"));
+}
+function ebtn(text, fn){ var b = el("button","ebtn", text); b.onclick = fn; return b; }
 
 /* ---------- 에디터 패널 — 언제나 열린 파일의 원문 ---------- */
 function panel(){ return clear(document.getElementById("panel")); }
@@ -109,17 +125,18 @@ function gotoLine(line){
 }
 function renderRaw(){
   var p = panel();
+  renderPathline();
+  renderStatus();
   if(S.edit && S.edit.path === S.filePath) return renderEdit(p);
   if(S.fileErr){ p.appendChild(el("div","pad")).appendChild(el("p","err", S.fileErr)); return; }
   if(!S.file){
     var pd = p.appendChild(el("div","pad"));
-    // 파일이 열리면 툴바가 역할을 설명하므로, 미선택일 때만 한 줄 설명
+    // 파일이 열리면 경로 줄 툴바가 역할을 설명하므로, 미선택일 때만 한 줄 설명
     if(!S.filePath) pd.appendChild(viewHint("왼쪽 목록에서 항목을 선택하세요 · 액티비티 바로 파일/규칙/스킬/훅/MCP 전환"));
     pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "열린 파일이 없습니다."));
     return;
   }
   if(isCompare(S.filePath)) return renderCompare(p);
-  p.appendChild(readBar());
   if(S.issues && S.issues.length) p.appendChild(issueList(S.issues));
   var lines = (S.file.text || "").split("\n");
   var heads = headMap(), folded = S.folds[S.filePath] || null;
@@ -208,19 +225,6 @@ function isPluginFile(path){
   return String(m.origin || "").indexOf("플러그인 ") === 0;
 }
 function tbtn(text, fn){ var b = el("button", null, text); b.onclick = fn; return b; }
-// 원문(읽기) 뷰 툴바 — 편집 진입 또는 읽기 전용 안내
-function readBar(){
-  var bar = el("div","tbar");
-  if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint","읽기 전용 (플러그인)"));
-  else bar.appendChild(tbtn("편집", function(){ startEdit(); }));
-  if(keys(headMap()).length){
-    bar.appendChild(tbtn("모두 접기", function(){ foldAll(true); }));
-    bar.appendChild(tbtn("모두 펼치기", function(){ foldAll(false); }));
-  }
-  var m = S.meta[S.filePath] || {};
-  if(m.shared) bar.appendChild(el("span","hint","팀 공유 (git 추적)"));
-  return bar;
-}
 function issueList(issues){
   var box = el("div","issues");
   if(!issues.length){ box.appendChild(el("div","hint","문제 없음")); return box; }

@@ -1,6 +1,6 @@
-// inspector — 오른쪽 인스펙터 렌더와 토글 컨트롤(스킬 레벨·저장 대상·토글 반영)
+// inspector — 선택한 것에 관한 섹션만. 스캔 정보·재스캔·종료는 하단 상태바로 갔다
 "use strict";
-// 인스펙터 토글 섹션의 경고·오류 줄 — 토글 컨트롤과 따로 갱신한다
+// 토글 섹션의 경고·오류 줄 — 토글 컨트롤과 따로 갱신한다
 function toggleNotes(){
   var box = el("div");
   box.id = "togglenotes";
@@ -18,7 +18,7 @@ function renderToggleNotes(box){
   else if(c < 0) box.appendChild(el("div","sharewarn","Claude Code 스킬 토글 미지원 버전 — 토글해도 적용되지 않을 수 있음"));
   if(S.toggleErr) box.appendChild(el("div","togglemsg", S.toggleErr));
 }
-// 인스펙터의 저장 대상 select
+// 저장 대상 select
 function targetSelect(){
   var wrap = el("div","ctl");
   var tgt = el("select","tgt");
@@ -31,7 +31,7 @@ function targetSelect(){
   tgt.value = S.toggleTarget;
   tgt.disabled = !toggleReady();
   tgt.setAttribute("aria-label","토글 저장 대상 파일");
-  tgt.onchange = function(){ S.toggleTarget = tgt.value; renderToggleNotes(); };
+  tgt.onchange = function(){ S.toggleTarget = tgt.value; renderToggleNotes(); renderSide(); };
   wrap.appendChild(el("span","hint","저장 대상"));
   wrap.appendChild(tgt);
   return wrap;
@@ -72,15 +72,9 @@ function applyToggle(body, section, key){
   renderSide();
   renderInspector();
 }
-
-// 인스펙터 토글 줄 — 스위치 + 4단계 select
+// 인스펙터 토글 줄 — 스위치 + "이 프로젝트에서 사용" 라벨 + 4단계 select
 function skillCtrls(c){
   var row = el("div","ctl"), cur = skillOverrides()[c.key] || "on", on = cur !== "off";
-  var sw = el("button","switch", on ? "ON" : "OFF");
-  sw.setAttribute("role","switch");
-  sw.setAttribute("aria-checked", String(on));
-  sw.setAttribute("aria-label", c.name + " — 이 프로젝트에서 사용 (인스펙터)");
-  sw.title = "이 프로젝트에서 사용";
   var sel = el("select","lvl");
   LEVELS.forEach(function(o){
     var op = el("option", null, o[1]);
@@ -89,11 +83,13 @@ function skillCtrls(c){
   });
   sel.value = cur;
   sel.setAttribute("aria-label", c.name + " 사용 범위");
-  var ctrls = [sw, sel], dis = !toggleReady();
-  sw.disabled = dis; sel.disabled = dis;
-  sw.onclick = function(){ doToggle("skillOverrides", c.key, on ? "off" : "on", ctrls); };
-  sel.onchange = function(){ doToggle("skillOverrides", c.key, sel.value, ctrls); };
+  var sw = switchEl({on:on, label: c.name + " — 이 프로젝트에서 사용 (인스펙터)",
+    title:"이 프로젝트에서 사용", disabled: !toggleReady(),
+    onToggle: function(){ doToggle("skillOverrides", c.key, on ? "off" : "on", [sw, sel]); }});
+  sel.disabled = !toggleReady();
+  sel.onchange = function(){ doToggle("skillOverrides", c.key, sel.value, [sw, sel]); };
   row.appendChild(sw);
+  row.appendChild(el("span", null, "이 프로젝트에서 사용"));
   row.appendChild(sel);
   return row;
 }
@@ -137,9 +133,12 @@ async function ensureCache(path){
 }
 
 /* ---------- 인스펙터 ---------- */
-function section(parent, title){
+function section(parent, title, count){
   var s = el("section");
-  s.appendChild(el("div","sec-t", title));
+  var t = el("div","sec-t");
+  t.appendChild(el("span", null, title));
+  if(count != null) t.appendChild(el("span","n", String(count)));
+  s.appendChild(t);
   parent.appendChild(s);
   return s;
 }
@@ -147,209 +146,245 @@ function kvRow(grid, k, v, cls){
   grid.appendChild(el("span","k", k));
   grid.appendChild(el("span","v"+(cls?" "+cls:""), v));
 }
-function renderInspector(){
-  var ins = clear(document.getElementById("inspector"));
-  /* 스캔 */
-  var sc = section(ins, "스캔");
-  var g1 = el("div","kvgrid");
-  if(S.scan){
-    kvRow(g1, "시각", new Date(S.scan.scanned_at).toLocaleString("ko-KR"));
-    var v = S.scan.claude_version, c = cmpVer(v);
-    kvRow(g1, "Claude Code", c === null ? "미확인" : v, c === null ? "warn" : null);
-    if(c === null) kvRow(g1, "경고", "버전 미확인 — 스킬 토글 지원 여부 확인 불가", "warn");
-    else if(c < 0) kvRow(g1, "경고", "스킬 토글 미지원 버전", "warn");
-  }else{
-    kvRow(g1, "시각", S.loading ? "스캔 중…" : "-");
-  }
-  sc.appendChild(g1);
-  if(S.msg) sc.appendChild(el("div", S.msgOk ? "hint" : "err", S.msg));
-  if(S.scanErr) sc.appendChild(retryBtn(loadScan));
-  var errs = (S.scan && S.scan.errors) || [];
-  if(errs.length){
-    var eb = el("button","linkbtn","오류 "+errs.length+"건");
-    eb.setAttribute("aria-expanded", String(S.errOpen));
-    eb.onclick = function(){ S.errOpen = !S.errOpen; renderInspector(); };
-    sc.appendChild(eb);
-    if(S.errOpen){
-      var list = el("div"); list.id = "errlist";
-      errs.forEach(function(e){ list.appendChild(el("div", null, (e.path||"")+" — "+(e.error||""))); });
-      sc.appendChild(list);
-    }
-  }
-  /* 속성 */
-  var ps = section(ins, "속성");
-  var g2 = el("div","kvgrid"), any = false;
+function openItem(){
+  return S.filePath ? collect().filter(function(c){ return c.path === S.filePath; })[0] : null;
+}
+// 헤더 제목 = 선택 대상 이름
+function insTitle(){
+  if(S.selHook) return (S.selHook.event || "훅") + " · " + (S.selHook.matcher || "(전체)");
+  if(S.selMcp) return S.selMcp.name || "MCP";
+  var item = openItem();
+  if(item) return item.name;
   if(S.filePath){
-    any = true;
+    if(isCompare(S.filePath)) return "비교: " + cmpTitle(S.filePath);
     var m = S.meta[S.filePath] || {};
-    kvRow(g2, "범위", m.scope || "-");
-    kvRow(g2, "출처", m.origin || "-");
-    kvRow(g2, "공유", m.shared ? "팀 공유 (git 추적)" : "개인", m.shared ? "shared" : null);
-    if(m.lazy) kvRow(g2, "적재", "지연 로드 (해당 폴더 작업 시)", "warn");
-    if(S.file && isCompare(S.filePath)){
-      kvRow(g2, "비교 제목", cmpTitle(S.filePath));
-      kvRow(g2, "매치", len(S.file.matches) + "곳");
-    }else if(S.file){
-      kvRow(g2, "크기", kb(S.file.size));
-      kvRow(g2, "수정", ymd(S.file.mtime));
-      kvRow(g2, "줄바꿈", (S.file.crlf ? "CRLF" : "LF") + " · BOM " + (S.file.bom ? "있음" : "없음"));
-      if(S.file.sections) kvRow(g2, "섹션", S.file.sections.length + "개");
-    }else if(S.fileErr){
-      kvRow(g2, "본문", "불러오지 못함", "warn");
-    }else{
-      kvRow(g2, "본문", "불러오는 중…");
-    }
+    return m.label || baseName(S.filePath);
   }
-  if(!S.filePath && S.fileErr){
-    any = true;
-    kvRow(g2, "파일", S.fileErr, "warn");
+  if(S.project) return S.project.name || S.project.path;
+  return "인스펙터";
+}
+/* 스캔 오류 — 상태바의 "오류 N건" 을 눌렀을 때만 */
+function errSection(ins){
+  var errs = (S.scan && S.scan.errors) || [];
+  if(!S.errOpen || !errs.length) return;
+  var s = section(ins, "스캔 오류", errs.length);
+  var list = el("div");
+  list.id = "errlist";
+  errs.forEach(function(e){ list.appendChild(el("div", null, (e.path||"")+" — "+(e.error||""))); });
+  s.appendChild(list);
+}
+/* 파일 속성 */
+function fileProps(ins){
+  var s = section(ins, "속성");
+  var g = el("div","kvgrid"), m = S.meta[S.filePath] || {};
+  kvRow(g, "범위", m.scope || "-");
+  kvRow(g, "출처", m.origin || "-");
+  kvRow(g, "공유", m.shared ? "팀 공유 (git 추적)" : "개인", m.shared ? "shared" : null);
+  if(m.lazy) kvRow(g, "적재", "지연 로드 (해당 폴더 작업 시)", "warn");
+  if(S.file && isCompare(S.filePath)){
+    kvRow(g, "비교 제목", cmpTitle(S.filePath));
+    kvRow(g, "매치", len(S.file.matches) + "곳");
+  }else if(S.file){
+    kvRow(g, "크기", kb(S.file.size));
+    kvRow(g, "수정", ymd(S.file.mtime));
+    kvRow(g, "줄바꿈", (S.file.crlf ? "CRLF" : "LF") + " · BOM " + (S.file.bom ? "있음" : "없음"));
+    if(S.file.sections) kvRow(g, "섹션", S.file.sections.length + "개");
+  }else if(S.fileErr){
+    kvRow(g, "본문", "불러오지 못함", "warn");
+  }else{
+    kvRow(g, "본문", "불러오는 중…");
   }
-  if(S.project){
-    any = true;
-    if(S.filePath || S.fileErr) g2.appendChild(el("span","k"," ")), g2.appendChild(el("span","v"," "));
-    var p = S.project;
-    kvRow(g2, "프로젝트", p.name || p.path);
-    kvRow(g2, "경로", p.path);
-    if(p.exists === false) kvRow(g2, "상태", "경로 없음", "warn");
-    else{
-      kvRow(g2, "스캔 범위", p.coverage === "root-only"
-        ? "루트만 · " + (COVER_KO[p.coverage_reason] || p.coverage_reason || "사유 미상")
-        : "전체", p.coverage === "root-only" ? "warn" : null);
-      if(p.truncated || p.incomplete) kvRow(g2, "완결성", "일부만 스캔", "warn");
-      kvRow(g2, "git", p.git ? "예" : "아니오");
-      var tc = projToggleCount(p);
-      kvRow(g2, "이 프로젝트 토글", "스킬 " + tc.skills + " · 플러그인 " + tc.plugins);
-    }
-  }
-  if(!any) ps.appendChild(el("div","hint","파일이나 프로젝트를 선택하면 속성이 표시됩니다."));
-  else ps.appendChild(g2);
-  /* 항목 — 열린 파일이 스킬/에이전트/커맨드일 때 */
-  var item = S.filePath ? collect().filter(function(c){ return c.path === S.filePath; })[0] : null;
-  if(item){
-    var its = section(ins, "항목");
-    var g3 = el("div","kvgrid");
-    kvRow(g3, "이름", item.name);
-    kvRow(g3, "종류", KIND_KO[item.kind] || item.kind);
-    kvRow(g3, "출처", item.origin);
-    if(item.off) kvRow(g3, "상태", item.offLabel || "OFF", "warn");
-    its.appendChild(g3);
-    its.appendChild(el("div","desc"+(item.desc ? "" : " none"), item.desc || "설명 없음"));
-  }
-  /* 토글 — 저장 대상·경고는 항목 선택과 무관하게 항상 여기 */
-  var ts = section(ins, "토글");
-  if(item && item.kind === "agent")
+  s.appendChild(g);
+}
+/* 항목(스킬·에이전트·커맨드) */
+function itemSections(ins, item){
+  var s = section(ins, "항목");
+  var g = el("div","kvgrid");
+  kvRow(g, "종류", KIND_KO[item.kind] || item.kind);
+  kvRow(g, "출처", item.origin);
+  if(item.off) kvRow(g, "상태", item.offLabel || "OFF", "warn");
+  var isrc = settingSource("skillOverrides", item.key);
+  kvRow(g, "값 출처", isrc ? isrc.label : "기본값");
+  s.appendChild(g);
+  s.appendChild(el("div","desc"+(item.desc ? "" : " none"), item.desc || "설명 없음"));
+
+  var ts = section(ins, "이 프로젝트에서");
+  if(item.kind === "agent")
     ts.appendChild(el("div","hint","에이전트는 토글 대상이 아닙니다."));
-  else if(item && item.pluginOwned){
-    ts.appendChild(el("div","hint","플러그인 단위 스위치는 스킬 사이드바의 섹션 헤더에서 켜고 끕니다."));
+  else if(item.pluginOwned){
+    ts.appendChild(el("div","hint","플러그인 단위 스위치는 스킬 사이드바의 그룹 헤더에서 켜고 끕니다."));
     var opl = ((S.scan && S.scan.plugins) || []).filter(function(x){
       return ("플러그인:" + (x.name || x.key)) === item.origin; })[0];
-    if(opl && opl.exists !== false) ts.appendChild(pluginSwitch(opl));
+    if(opl && opl.exists !== false){
+      var row = el("div","ctl");
+      row.appendChild(pluginSwitch(opl));
+      row.appendChild(el("span", null, "이 프로젝트에서 플러그인 사용"));
+      var psrc = settingSource("enabledPlugins", opl.key);
+      if(psrc) row.appendChild(badge(psrc.label));
+      ts.appendChild(row);
+    }
   }
   else if(!toggleReady())
     ts.appendChild(el("div","hint", S.project ? "선택 프로젝트 경로 없음 — 토글 불가"
                                               : "토글하려면 파일 사이드바에서 프로젝트를 선택하세요"));
-  else if(item){
-    ts.appendChild(skillCtrls(item));
-    var isrc = settingSource("skillOverrides", item.key);
-    var sb = el("div","ctl");
-    sb.appendChild(el("span","hint","값 출처"));
-    sb.appendChild(badge(isrc ? isrc.label : "기본값"));
-    ts.appendChild(sb);
-  }
-  else ts.appendChild(el("div","hint","스킬·커맨드 파일을 열면 여기서 켜고 끕니다."));
+  else ts.appendChild(skillCtrls(item));
   ts.appendChild(targetSelect());
   ts.appendChild(toggleNotes());
-  /* 선택한 훅 */
-  if(S.selHook){
-    var hsel = section(ins, "선택한 훅");
-    var g4 = el("div","kvgrid");
-    kvRow(g4, "이벤트", S.selHook.event || "-");
-    kvRow(g4, "매처", S.selHook.matcher || "(없음)");
-    kvRow(g4, "출처", hookSource(S.selHook.source).label);
-    if(S.selHook.warn === "duplicate-star") kvRow(g4, "경고", "* 매처와 중복 발화", "warn");
-    hsel.appendChild(g4);
-    var cl = el("div","hooklist"), cmds = hookCmds(S.selHook);
-    if(!cmds.length) cl.appendChild(el("div","hint","명령 없음"));
-    cmds.forEach(function(c){ cl.appendChild(el("div","cmd", "→ " + c)); });
-    hsel.appendChild(cl);
-    if(!hookFile(S.selHook.source)) hsel.appendChild(el("div","hint","출처 파일은 열 수 없습니다 (플러그인)"));
+
+  var ps = section(ins, "속성");
+  var g2 = el("div","kvgrid"), m = S.meta[S.filePath] || {};
+  kvRow(g2, "공유", m.shared ? "팀 공유 (git 추적)" : "개인", m.shared ? "shared" : null);
+  if(S.file){
+    kvRow(g2, "크기", kb(S.file.size));
+    kvRow(g2, "수정", ymd(S.file.mtime));
+  }else kvRow(g2, "본문", S.fileErr ? "불러오지 못함" : "불러오는 중…", S.fileErr ? "warn" : null);
+  ps.appendChild(g2);
+}
+/* 훅 */
+function hookSections(ins){
+  var h = S.selHook, cmds = hookCmds(h);
+  var s = section(ins, "훅");
+  var g = el("div","kvgrid");
+  kvRow(g, "이벤트", h.event || "-");
+  kvRow(g, "매처", h.matcher || "(전체)");
+  kvRow(g, "출처", hookSource(h.source).label);
+  kvRow(g, "명령", cmds.length + "개");
+  if(h.warn === "duplicate-star") kvRow(g, "경고", "* 매처와 중복 발화", "warn");
+  s.appendChild(g);
+  if(!hookFile(h.source)) s.appendChild(el("div","hint","출처 파일은 열 수 없습니다 (플러그인)"));
+
+  var cs = section(ins, "명령", cmds.length);
+  if(!cmds.length) cs.appendChild(el("div","hint","명령 없음"));
+  cmds.forEach(function(c){ cs.appendChild(el("pre","cfg", String(c))); });
+
+  var others = ((S.scan && S.scan.hooks) || []).filter(function(x){
+    return x.event === h.event && hookKey(x) !== hookKey(h); });
+  var os = section(ins, "같은 이벤트의 다른 훅", others.length);
+  if(!others.length){ os.appendChild(el("div","hint","없습니다.")); return; }
+  var list = el("div","hooklist");
+  others.forEach(function(x){
+    var d = el("div","hookitem", (x.matcher || "(전체)") + " → " + (hookCmds(x).join(", ") || "(명령 없음)"));
+    var src = hookSource(x.source);
+    d.appendChild(el("span","hsrc "+(src.cls || ""), " · " + src.label));
+    list.appendChild(d);
+  });
+  os.appendChild(list);
+}
+/* MCP */
+function mcpSections(ins){
+  var m = S.selMcp, cfg = (m.config && typeof m.config === "object") ? m.config : {};
+  var s = section(ins, "서버");
+  var g = el("div","kvgrid");
+  kvRow(g, "출처", m.label || "-");
+  kvRow(g, "전송", cfg.command ? "command" : (cfg.url ? "url" : "설정 없음"));
+  kvRow(g, "환경변수", keys(cfg.env).length + "개");
+  s.appendChild(g);
+  var cs = section(ins, "설정");
+  cs.appendChild(el("pre","cfg", JSON.stringify(m.config == null ? null : m.config, null, 2)));
+}
+/* 프로젝트 */
+function projSection(ins){
+  var p = S.project;
+  var s = section(ins, "프로젝트");
+  var g = el("div","kvgrid");
+  kvRow(g, "이름", p.name || p.path);
+  kvRow(g, "경로", p.path);
+  if(p.exists === false) kvRow(g, "상태", "경로 없음", "warn");
+  else{
+    kvRow(g, "스캔 범위", p.coverage === "root-only"
+      ? "루트만 · " + (COVER_KO[p.coverage_reason] || p.coverage_reason || "사유 미상")
+      : "전체", p.coverage === "root-only" ? "warn" : null);
+    if(p.truncated || p.incomplete) kvRow(g, "완결성", "일부만 스캔", "warn");
+    kvRow(g, "git", p.git ? "예" : "아니오");
+    var tc = projToggleCount(p);
+    kvRow(g, "이 프로젝트 토글", "스킬 " + tc.skills + " · 플러그인 " + tc.plugins);
   }
-  /* 선택한 MCP */
-  if(S.selMcp){
-    var ms = section(ins, "선택한 MCP");
-    var g5 = el("div","kvgrid");
-    kvRow(g5, "이름", S.selMcp.name || "-");
-    kvRow(g5, "출처", S.selMcp.label || "-");
-    ms.appendChild(g5);
-    ms.appendChild(el("pre","cfg", JSON.stringify(S.selMcp.config == null ? null : S.selMcp.config, null, 2)));
-  }
-  /* 함께 적용됨 */
-  var es = section(ins, "함께 적용됨");
-  if(!S.project) es.appendChild(el("div","hint","프로젝트를 선택하세요."));
-  else if(S.project.exists === false) es.appendChild(el("div","hint","경로가 존재하지 않는 프로젝트입니다."));
-  else if(S.effErr){
+  s.appendChild(g);
+}
+/* 함께 적용됨 */
+function effSection(ins){
+  var es = section(ins, "함께 적용됨", S.eff ? S.eff.length : null);
+  if(!S.project) return es.appendChild(el("div","hint","프로젝트를 선택하세요."));
+  if(S.project.exists === false) return es.appendChild(el("div","hint","경로가 존재하지 않는 프로젝트입니다."));
+  if(S.effErr){
     es.appendChild(el("div","err","불러오지 못했습니다: "+S.effErr));
     es.appendChild(retryBtn(loadEff));
+    return;
   }
-  else if(!S.eff) es.appendChild(el("div","hint","불러오는 중…"));
-  else if(!S.eff.length) es.appendChild(el("div","hint","적용되는 규칙 파일이 없습니다."));
-  else{
-    var list2 = el("div","efflist");
-    S.eff.forEach(function(it, i){
-      var cur = it.path === S.filePath, im = S.meta[it.path] || {};
-      var row = el("div","effitem"+(cur ? " cur" : "")+(it.lazy ? " lazyit" : ""));
-      row.title = it.path;
-      row.appendChild(el("span","n", String(i+1)));
-      row.appendChild(el("span", null, (im.label || it.path) + (cur ? "  ← 현재" : "") + (it.lazy ? " · 지연" : "")));
-      list2.appendChild(row);
-    });
-    es.appendChild(list2);
-  }
-  /* 충돌 — 같은 제목 섹션이 여러 파일에 (V5 warn) */
-  var cs = section(ins, "충돌");
+  if(!S.eff) return es.appendChild(el("div","hint","불러오는 중…"));
+  if(!S.eff.length) return es.appendChild(el("div","hint","적용되는 규칙 파일이 없습니다."));
+  var list = el("div","efflist");
+  S.eff.forEach(function(it, i){
+    var cur = it.path === S.filePath, im = S.meta[it.path] || {};
+    var row = el("div","effitem"+(cur ? " cur" : "")+(it.lazy ? " lazyit" : ""));
+    row.title = it.path;
+    row.appendChild(el("span","n", String(i+1)));
+    row.appendChild(el("span", null, (im.label || it.path) + (cur ? "  ← 현재" : "") + (it.lazy ? " · 지연" : "")));
+    list.appendChild(row);
+  });
+  es.appendChild(list);
+}
+/* 충돌 — 같은 제목 섹션이 여러 파일에 (V5 warn) */
+function confSection(ins){
   var cflist = S.conflicts || [];
-  if(!S.project || S.project.exists === false) cs.appendChild(el("div","hint","프로젝트를 선택하세요."));
-  else if(!S.conflicts) cs.appendChild(el("div","hint", S.effErr ? "불러오지 못했습니다." : "불러오는 중…"));
-  else if(!cflist.length) cs.appendChild(el("div","hint","같은 제목의 섹션이 겹치지 않습니다."));
-  else{
-    var cl2 = el("div","cflist");
-    cflist.forEach(function(c){
-      var open = S.conflictSel === c.title;
-      var b = el("button","cfitem");
-      b.setAttribute("aria-expanded", String(open));
-      b.appendChild(el("span","arw", open ? "▾" : "▸"));
-      b.appendChild(el("span","t", c.title));
-      b.appendChild(badge(len(c.where) + "곳","warn"));
-      b.onclick = function(){ S.conflictSel = open ? null : c.title; renderInspector(); };
-      cl2.appendChild(b);
-      if(open) cl2.appendChild(conflictBodies(c));
-    });
-    cs.appendChild(cl2);
+  var cs = section(ins, "충돌", S.conflicts ? cflist.length : null);
+  if(!S.project || S.project.exists === false) return cs.appendChild(el("div","hint","프로젝트를 선택하세요."));
+  if(!S.conflicts) return cs.appendChild(el("div","hint", S.effErr ? "불러오지 못했습니다." : "불러오는 중…"));
+  if(!cflist.length) return cs.appendChild(el("div","hint","같은 제목의 섹션이 겹치지 않습니다."));
+  var cl = el("div","cflist");
+  cflist.forEach(function(c){
+    var open = S.conflictSel === c.title;
+    var b = el("button","cfitem");
+    b.setAttribute("aria-expanded", String(open));
+    b.appendChild(el("span","arw", open ? "▾" : "▸"));
+    b.appendChild(el("span","t", c.title));
+    b.appendChild(badge(len(c.where) + "곳","warn"));
+    b.onclick = function(){ S.conflictSel = open ? null : c.title; renderInspector(); };
+    cl.appendChild(b);
+    if(open) cl.appendChild(conflictBodies(c));
+  });
+  cs.appendChild(cl);
+}
+/* 이 프로젝트의 훅 */
+function projHookSection(ins){
+  var pref = "project:" + S.project.path + ":";
+  var mine = ((S.scan && S.scan.hooks) || []).filter(function(h){
+    return String(h.source||"").indexOf(pref) === 0; });
+  var hs = section(ins, "이 프로젝트의 훅", mine.length);
+  if(!mine.length) return hs.appendChild(el("div","hint","이 프로젝트에서 등록한 훅이 없습니다."));
+  var hl = el("div","hooklist");
+  mine.forEach(function(h){
+    var line = (h.event||"?") + " · " + (h.matcher || "(전체)") + " → " + (hookCmds(h).join(", ") || "(명령 없음)");
+    var d = el("div","hookitem", line);
+    if(h.warn === "duplicate-star") d.appendChild(el("span","warn", " · * 매처와 중복 발화"));
+    hl.appendChild(d);
+  });
+  hs.appendChild(hl);
+}
+function renderInspector(){
+  var ins = clear(document.getElementById("insbody"));
+  document.getElementById("ins-title").textContent = insTitle();
+  errSection(ins);
+  if(S.selHook) return hookSections(ins);
+  if(S.selMcp) return mcpSections(ins);
+  var item = openItem();
+  if(item) return itemSections(ins, item);
+  if(S.filePath){
+    fileProps(ins);
+    effSection(ins);
+    confSection(ins);
+    return;
   }
-  /* 이 프로젝트의 훅 */
-  var hs = section(ins, "이 프로젝트의 훅");
-  if(!S.project || S.project.exists === false) hs.appendChild(el("div","hint","프로젝트를 선택하세요."));
-  else{
-    var pref = "project:" + S.project.path + ":";
-    var mine = ((S.scan && S.scan.hooks) || []).filter(function(h){ return String(h.source||"").indexOf(pref) === 0; });
-    if(!mine.length) hs.appendChild(el("div","hint","이 프로젝트에서 등록한 훅이 없습니다."));
-    else{
-      var hl = el("div","hooklist");
-      mine.forEach(function(h){
-        var line = (h.event||"?") + " · " + (h.matcher || "(없음)") + " → " + (hookCmds(h).join(", ") || "(명령 없음)");
-        var d = el("div","hookitem", line);
-        if(h.warn === "duplicate-star"){
-          d.appendChild(el("span","warn", " · * 매처와 중복 발화"));
-        }
-        hl.appendChild(d);
-      });
-      hs.appendChild(hl);
-    }
+  if(S.fileErr){
+    var fs = section(ins, "파일");
+    fs.appendChild(el("div","warn", S.fileErr));
   }
-  ins.appendChild(el("div","spacer"));
-  var acts = el("div","acts");
-  var re = el("button", null, S.loading ? "스캔 중…" : "재스캔");
-  re.disabled = S.loading; re.onclick = loadScan; acts.appendChild(re);
-  var sd = el("button", null, "종료"); sd.onclick = shutdown; acts.appendChild(sd);
-  ins.appendChild(acts);
+  if(S.project){
+    projSection(ins);
+    effSection(ins);
+    confSection(ins);
+    if(S.project.exists !== false) projHookSection(ins);
+    return;
+  }
+  if(!S.fileErr) section(ins, "안내").appendChild(el("div","hint","사이드바에서 항목을 선택하세요."));
 }

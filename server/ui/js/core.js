@@ -12,6 +12,9 @@ var VIEW_HINT = {
   skills:"전역 · 이 프로젝트 · 플러그인의 스킬/에이전트/커맨드와 이 프로젝트에서의 ON/OFF",
   hooks:"settings.json 훅을 이벤트별 매처 → 명령 순서로. 색은 출처(전역/프로젝트/플러그인)",
   mcp:"MCP 서버를 출처별로"};
+// 사이드바 컨텍스트 줄(툴바 아래 한 줄) — 그 목록이 무엇을 기준으로 정렬·수집됐는지
+var VIEW_CTX = {rules:"적용 순서", skills:"ON/OFF 대상", hooks:"세션 이벤트 순",
+                mcpOne:"전역 + 이 프로젝트", mcpAll:"전역 + 모든 프로젝트"};
 var KIND_KO = {skill:"스킬", agent:"에이전트", command:"커맨드"};
 var SCOPE_KO = {global:"전역",
   "global-rules":"전역 rules", project:"프로젝트", "project-local":"프로젝트 로컬",
@@ -40,7 +43,11 @@ var S = {scan:null, project:null, side:"files", file:null, fileErr:null, filePat
          // fileCache[path] = /api/file 응답 (충돌 본문 표시용) — 재스캔 시 비운다
          fileCache:Object.create(null), cacheBusy:Object.create(null),
          // cmpq: 규칙 사이드바의 제목 비교 검색어
-         cmpq:""};
+         cmpq:"",
+         // fileq/hookq/mcpq: 뷰별 툴바 상태. cardq 와 같이 재스캔·프로젝트 전환에도 유지
+         fileq:{q:"", shared:false},
+         hookq:{q:"", src:{global:true, project:true, plugin:true}},
+         mcpq:{q:"", tr:{command:false, url:false}}};
 /* 비교 가상 탭: 경로 자리에 "compare:<제목>" 을 쓴다 — 탭·에디터 기존 흐름을 그대로 탄다 */
 var CMP = "compare:";
 function isCompare(p){ return String(p||"").indexOf(CMP) === 0; }
@@ -67,7 +74,104 @@ var SAMPLE = location.hash === "#sample";
 
 function el(tag, cls, text){var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e;}
 function badge(text, cls){return el("span","badge"+(cls?" "+cls:""), text);}
-function viewHint(text){return el("p","hint vhint", text);}
+
+function viewHint(text){return el("p","hint", text);}
+
+/* ---------- 공용 UI 부품 (사이드바 4층 규격) ---------- */
+var SVG_NS = "http://www.w3.org/2000/svg";
+// 24 viewBox · stroke currentColor · fill none. 텍스트 라벨이 따로 있으므로 aria-hidden
+var ICONS = {
+  files:["M4 4h6l2 2h8v14H4z"],
+  rules:["M6 4h12v16H6z","M9 9h6","M9 13h6","M9 17h3"],
+  skills:["M12 3l2.5 5.5L20 9.5l-4 3.9.9 5.6L12 16.4 7.1 19l.9-5.6-4-3.9 5.5-1z"],
+  hooks:["M4 12h4","M16 12h4","M8 12a4 4 0 0 1 8 0","M8 12a4 4 0 0 0 8 0"],
+  mcp:["M5 7h14","M5 12h14","M5 17h14","M8 5v4","M16 10v4","M11 15v4"],
+  rescan:["M20 12a8 8 0 1 1-2.3-5.7","M20 4v5h-5"],
+  quit:["M12 3v9","M6.3 7.3a8 8 0 1 0 11.4 0"]};
+function icon(name){
+  var svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox","0 0 24 24");
+  svg.setAttribute("width","18");
+  svg.setAttribute("height","18");
+  svg.setAttribute("fill","none");
+  svg.setAttribute("stroke","currentColor");
+  svg.setAttribute("stroke-width","1.6");
+  svg.setAttribute("stroke-linecap","round");
+  svg.setAttribute("stroke-linejoin","round");
+  svg.setAttribute("aria-hidden","true");
+  (ICONS[name] || []).forEach(function(d){
+    var p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  });
+  return svg;
+}
+// 행 오른쪽 메타 — 행당 태그 1개가 원칙 (나머지는 title 과 인스펙터가 텍스트로 남긴다)
+function tag(text, cls){ return el("span","tag"+(cls ? " "+cls : ""), text); }
+function warnEl(text){ return el("span","wn", "⚠ " + text); }
+// 텍스트 없는 스위치 — aria-label·aria-checked 필수
+function switchEl(o){
+  var b = el("button","sw");
+  b.setAttribute("role","switch");
+  b.setAttribute("aria-checked", String(!!o.on));
+  b.setAttribute("aria-label", o.label);
+  if(o.key) b.setAttribute("data-key", o.key);
+  if(o.title) b.title = o.title;
+  b.disabled = !!o.disabled;
+  if(o.onToggle) b.onclick = function(){ o.onToggle(b); };
+  return b;
+}
+// 그룹 헤더 — 본문은 접기 button, 오른쪽 ctrl 은 형제 (중첩 button 금지). 열림 여부를 돌려준다
+function groupHd(parent, o){
+  var open = o.force ? true : isOpen(o.id, o.dflt);
+  var wrap = el("div","grp");
+  if(o.first) wrap.style.marginTop = "0";
+  var b = el("button","grphd");
+  b.setAttribute("aria-expanded", String(open));
+  b.setAttribute("data-key", o.id);
+  b.appendChild(el("span","arw", open ? "▾" : "▸"));
+  b.appendChild(el("span","gt", o.title));
+  if(o.count != null) b.appendChild(el("span","num", String(o.count)));
+  if(o.title2) b.title = o.title2;
+  b.onclick = o.onToggle || function(){ setOpen(o.id, o.dflt); };
+  wrap.appendChild(b);
+  if(o.ctrl) wrap.appendChild(o.ctrl);
+  parent.appendChild(wrap);
+  return open;
+}
+/* 28px 행. 구성 순서: 화살표 → [순번] → 이름 → [sub] → [경고] → [태그] → [숫자] → [스위치]
+   래퍼 div + 본문 button + 형제 스위치 — 중첩 button 금지 */
+function uiRow(parent, o){
+  var wrap = el("div","r" + (o.src ? " src-"+o.src : "") + (o.sel ? " sel" : "") + (o.dim ? " dim" : ""));
+  wrap.style.paddingLeft = (8 + (o.depth || 0) * 14) + "px";
+  if(o.arrowBtn){
+    var ab = el("button","arw", o.arrowBtn.open ? "▾" : "▸");
+    ab.setAttribute("aria-expanded", String(!!o.arrowBtn.open));
+    ab.setAttribute("aria-label", o.arrowBtn.label);
+    ab.setAttribute("data-key", o.arrowBtn.key);
+    if(o.arrowBtn.disabled){ ab.disabled = true; ab.textContent = ""; }
+    ab.onclick = o.arrowBtn.onclick;
+    wrap.appendChild(ab);
+  }
+  var b = el("button","rmain");
+  if(o.key) b.setAttribute("data-key", o.key);
+  if(o.title) b.title = o.title;
+  if(o.ariaCurrent) b.setAttribute("aria-current","true");
+  if(o.expanded != null) b.setAttribute("aria-expanded", String(o.expanded));
+  if(!o.arrowBtn) b.appendChild(el("span","arw", o.arrow || ""));
+  if(o.num != null && o.rnum) b.appendChild(el("span","rnum", String(o.num)));
+  b.appendChild(el("span","nm"+(o.bold ? " b" : ""), o.name));
+  if(o.sub) b.appendChild(el("span","sub", o.sub));
+  if(o.warn) b.appendChild(warnEl(o.warn));
+  if(o.tag) b.appendChild(tag(o.tag, o.tagCls));
+  else if(o.count != null) b.appendChild(el("span","num", String(o.count)));
+  if(o.onclick) b.onclick = o.onclick;
+  else{ b.disabled = true; b.setAttribute("aria-disabled","true"); }
+  wrap.appendChild(b);
+  if(o.sw) wrap.appendChild(o.sw);
+  parent.appendChild(wrap);
+  return wrap;
+}
 function clear(n){while(n.firstChild) n.removeChild(n.firstChild); return n;}
 function kb(n){return (typeof n==="number"? (n/1024).toFixed(1) : "?")+" KB";}
 function ymd(mtime){
