@@ -13,8 +13,8 @@ import argparse
 import json
 import logging
 import os
-import os.path
 import threading
+import time
 import urllib.error
 import urllib.request
 import webbrowser
@@ -27,6 +27,7 @@ import core  # noqa: E402
 
 VERSION = "0.1.0"
 PORT_TRIES = 20
+LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
 UI = Path(__file__).resolve().parent / "ui" / "index.html"
 
 log = logging.getLogger("config-map.web")
@@ -88,8 +89,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+        self.wfile.write(body)
 
     def _json(self, code: int, obj):
         self._send(code, json.dumps(obj, ensure_ascii=False).encode("utf-8"),
@@ -131,10 +131,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def _post(self):
         if urlparse(self.path).path == "/api/shutdown":
+            origin = self.headers.get("Origin")
+            if origin and origin not in self._own_origins():
+                return self._err(403, "forbidden origin")
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         self._err(404, "not found")
+
+    def _own_origins(self) -> set:
+        port = self.server.server_address[1]
+        return {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     # --- 엔드포인트 ---
 
@@ -154,6 +161,7 @@ class Handler(BaseHTTPRequestHandler):
             _allowed = _allowed_paths(result)
         self._json(200, result)
 
+    # ponytail: resolve와 open 사이 심링크 교체는 방어하지 않음 — 127.0.0.1 전용·본인 파일 읽기 도구. 필요 시 os.open(O_NOFOLLOW)+fstat 비교로 교체
     def _file(self, raw: str):
         if not raw:
             return self._err(400, "path required")
@@ -164,8 +172,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(409, "scan first")
         try:
             path = _norm(raw)
-        except (OSError, ValueError) as e:
-            return self._err(400, f"bad path: {e}")
+        except (OSError, ValueError):
+            return self._err(404, "not found")
         if path not in allowed:
             return self._err(404, "not in scan result")
         meta = core.read_text(path)
@@ -182,8 +190,8 @@ class Handler(BaseHTTPRequestHandler):
             projects = (_scan or {}).get("projects") or []
         try:
             path = _norm(raw)
-        except (OSError, ValueError) as e:
-            return self._err(400, f"bad path: {e}")
+        except (OSError, ValueError):
+            return self._err(404, "unknown project")
         for p in projects:
             if p.get("path") == path:
                 return self._json(200, core.effective_rules(p))
@@ -202,6 +210,30 @@ def live_url() -> str | None:
             return url if json.load(r).get("ok") else None
     except (OSError, urllib.error.URLError, ValueError):
         return None
+
+
+def _acquire(lock: Path) -> bool:
+    """기동 구간 직렬화용 프로세스 간 잠금. O_EXCL 생성으로 한 프로세스만 통과."""
+    lock.parent.mkdir(parents=True, exist_ok=True)
+
+    def create():
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            return True
+        except FileExistsError:
+            return False
+
+    deadline = time.monotonic() + LOCK_WAIT
+    while not create():
+        if time.monotonic() >= deadline:
+            log.warning("잠금 파일이 %.1f초 넘게 남아 stale로 보고 제거: %s", LOCK_WAIT, lock)
+            try:  # 잠금 주인이 죽은 경우 — 지우고 한 번만 다시 잡는다
+                lock.unlink()
+            except OSError:
+                pass
+            return create()
+        time.sleep(0.1)
+    return True
 
 
 def bind(host: str, port: int) -> ThreadingHTTPServer | None:
@@ -230,26 +262,34 @@ def main(argv=None) -> int:
     ap.add_argument("--host", default="127.0.0.1", help="테스트용. 기본 127.0.0.1")
     args = ap.parse_args(argv)
 
-    existing = live_url()
-    if existing:
-        print(existing, flush=True)
-        if not args.no_browser:
-            webbrowser.open(existing)
-        return 0
-
-    httpd = bind(args.host, args.port)
-    if httpd is None:
-        sys.stderr.write(f"포트 {args.port}부터 {PORT_TRIES}개가 모두 사용 중입니다."
-                         f" --port 로 다른 포트를 지정하세요.\n")
-        return 1
-
-    url = "http://{}:{}".format(args.host, httpd.server_address[1])
-    # ponytail: live_url() 확인과 아래 쓰기 사이에 다른 프로세스가 끼어들 수 있다.
-    # 동시 기동은 드물어 프로세스 간 잠금 생략, 필요 시 O_EXCL 생성으로 교체.
     sf = state_path()
-    sf.parent.mkdir(parents=True, exist_ok=True)
-    sf.write_text(json.dumps({"port": httpd.server_address[1], "pid": os.getpid(),
-                              "url": url}), encoding="utf-8")
+    lock = sf.with_suffix(".lock")
+    if not _acquire(lock):
+        sys.stderr.write(f"기동 잠금을 얻지 못했습니다: {lock}\n")
+        return 1
+    try:  # 여기부터 server.json 쓰기까지가 동시 기동 직렬화 구간
+        existing = live_url()
+        if existing:
+            print(existing, flush=True)
+            if not args.no_browser:
+                webbrowser.open(existing)
+            return 0
+
+        httpd = bind(args.host, args.port)
+        if httpd is None:
+            sys.stderr.write(f"포트 {args.port}부터 {PORT_TRIES}개가 모두 사용 중입니다."
+                             f" --port 로 다른 포트를 지정하세요.\n")
+            return 1
+
+        url = "http://{}:{}".format(args.host, httpd.server_address[1])
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(json.dumps({"port": httpd.server_address[1], "pid": os.getpid(),
+                                  "url": url}), encoding="utf-8")
+    finally:
+        try:
+            lock.unlink()
+        except OSError:
+            pass
     log.info("serving %s", url)
     print(url, flush=True)  # 커맨드 파일이 이 첫 줄을 읽는다
     if not args.no_browser:

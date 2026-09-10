@@ -1,6 +1,7 @@
 import ast
 import io
 import json
+import socket
 import sys
 import tempfile
 import threading
@@ -45,13 +46,24 @@ class ServerCase(unittest.TestCase):
         self.outside = root / "secret.txt"
         self.outside.write_text("nope\n", encoding="utf-8")
 
+        self.settings_file = self.home / ".claude" / "settings.json"
+        self.settings_file.write_text("{}\n", encoding="utf-8")
+        plug = root / "plugin"
+        (plug / "skills").mkdir(parents=True)
+        self.manifest_file = plug / "plugin.json"
+        self.manifest_file.write_text('{"name": "demo"}\n', encoding="utf-8")
+        self.plugin_skill = plug / "skills" / "SKILL.md"
+        self.plugin_skill.write_text("# skill\n", encoding="utf-8")
+
         p = lambda f: Path(f).resolve().as_posix()  # noqa: E731
         self.proj_path = p(self.proj)
         self.fake_scan = {
             "scanned_at": "2026-09-10T00:00:00+00:00",
             "home": p(self.home),
             "claude_version": None,
-            "global": {"claude_md": None, "rules": [], "settings": {},
+            "global": {"claude_md": None, "rules": [],
+                       "settings": {"settings.json": {"path": p(self.settings_file),
+                                                      "data": {}, "shared": False}},
                        "skills": [], "agents": [], "commands": []},
             "projects": [{
                 "path": self.proj_path, "exists": True, "name": "proj",
@@ -61,7 +73,14 @@ class ServerCase(unittest.TestCase):
                 "rules": [], "settings": {},
                 "skills": [], "agents": [], "commands": [],
             }],
-            "plugins": [], "mcp": [], "hooks": [], "errors": [],
+            "plugins": [{
+                "key": "demo", "name": "demo", "version": "1.0.0", "scope": "global",
+                "path": p(self.manifest_file.parent), "exists": True,
+                "manifest": {"path": p(self.manifest_file), "data": {"name": "demo"}},
+                "skills": [{"path": p(self.plugin_skill), "name": "skill"}],
+                "commands": [], "hooks": [], "mcp_servers": [],
+            }],
+            "mcp": [], "hooks": [], "errors": [],
         }
         scan = mock.patch.object(web_server.core, "scan", return_value=self.fake_scan)
         scan.start()
@@ -175,29 +194,67 @@ class TestEndpoints(ServerCase):
         code, _, _ = get(self.url + "/api/ping")
         self.assertEqual(code, 200)
 
-    def test_null_byte_in_path_is_400(self):
+    def test_null_byte_in_path_is_404(self):
         self.scan()
         code, body, _ = get(self.url + "/api/file?path=" + self.allowed.as_posix() + "%00")
-        self.assertEqual(code, 400)
-        self.assertIn("bad path", json.loads(body)["error"])
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not found")
 
         code, body, _ = get(self.url + "/api/effective?project=" + self.proj_path + "%00")
-        self.assertEqual(code, 400)
-        self.assertIn("bad path", json.loads(body)["error"])
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "unknown project")
+
+    def test_shutdown_rejects_foreign_origin(self):
+        req = urllib.request.Request(self.url + "/api/shutdown", method="POST",
+                                     headers={"Origin": "http://evil.example"})
+        code, body, _ = get(req)
+        self.assertEqual(code, 403)
+        self.assertEqual(json.loads(body)["error"], "forbidden origin")
+
+        code, _, _ = get(self.url + "/api/ping")  # 서버는 그대로 살아 있다
+        self.assertEqual(code, 200)
+
+    def test_shutdown_without_origin_is_200(self):
+        req = urllib.request.Request(self.url + "/api/shutdown", method="POST")
+        code, body, _ = get(req)
+        self.assertEqual(code, 200)
+        self.assertTrue(json.loads(body)["ok"])
+        self.thread.join(timeout=5)
+
+    def test_file_serves_settings_manifest_and_plugin_skill(self):
+        self.scan()
+        for f in (self.settings_file, self.manifest_file, self.plugin_skill):
+            code, body, _ = get(self.url + "/api/file?path=" + f.as_posix())
+            self.assertEqual(code, 200, f)
+            self.assertEqual(json.loads(body)["path"], f.resolve().as_posix())
 
     def _run_main(self):
-        """별도 스레드에서 main 실행 → (thread, rc list, url). 상태 파일 생성까지 대기."""
+        """별도 스레드에서 main 실행 → (thread, rc list, url). ping 200까지 대기."""
         sf = web_server.state_path()
         rc = []
         t = threading.Thread(
             target=lambda: rc.append(web_server.main(["--no-browser", "--port", "0"])),
             daemon=True)
         t.start()
-        deadline = time.time() + 5
-        while not sf.exists() and time.time() < deadline:
+        deadline = time.time() + 10
+        url = None
+        while time.time() < deadline:
+            try:
+                candidate = json.loads(sf.read_text(encoding="utf-8"))["url"]
+                if get(candidate + "/api/ping")[0] == 200:
+                    url = candidate
+                    break
+            except (OSError, ValueError, KeyError, urllib.error.URLError):
+                pass
             time.sleep(0.02)
-        self.assertTrue(sf.exists(), "server.json이 생성되지 않았다")
-        return t, rc, json.loads(sf.read_text(encoding="utf-8"))["url"]
+        self.assertIsNotNone(url, "서버가 준비되지 않았다 (server.json + ping)")
+        return t, rc, url
+
+    def _stop_main(self, t, url):
+        urllib.request.urlopen(
+            urllib.request.Request(url + "/api/shutdown", method="POST"), timeout=5).close()
+        t.join(timeout=5)
+        self.assertFalse(t.is_alive())
 
     def test_main_end_to_end(self):
         sf = web_server.state_path()
@@ -227,6 +284,43 @@ class TestEndpoints(ServerCase):
         self.assertEqual(rc, [0])
         self.assertTrue(sf.exists(), "다른 pid의 server.json을 지웠다")
         self.assertEqual(json.loads(sf.read_text(encoding="utf-8"))["pid"], 999999)
+
+    def test_stale_state_file_is_replaced_on_start(self):
+        sf = web_server.state_path()
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        sf.write_text(json.dumps({"port": 1, "pid": 999999,
+                                  "url": "http://127.0.0.1:1"}), encoding="utf-8")
+        with mock.patch.object(web_server.webbrowser, "open", lambda u: None), \
+                redirect_stdout(io.StringIO()):
+            t, rc, url = self._run_main()
+            state = json.loads(sf.read_text(encoding="utf-8"))
+            self._stop_main(t, url)
+        self.assertEqual(rc, [0])
+        self.assertNotEqual(state["pid"], 999999)
+        self.assertEqual(state["url"], url)
+        self.assertNotEqual(state["url"], "http://127.0.0.1:1")
+
+    def test_stale_lock_is_broken_and_removed(self):
+        lock = web_server.state_path().with_suffix(".lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("", encoding="utf-8")
+        with mock.patch.object(web_server, "LOCK_WAIT", 0.3), \
+                mock.patch.object(web_server.webbrowser, "open", lambda u: None), \
+                redirect_stdout(io.StringIO()):
+            t, rc, url = self._run_main()
+            self.assertFalse(lock.exists(), "기동 후에도 잠금 파일이 남았다")
+            self._stop_main(t, url)
+        self.assertEqual(rc, [0])
+
+    def test_bind_moves_to_next_port(self):
+        taken = socket.socket()
+        self.addCleanup(taken.close)
+        taken.bind(("127.0.0.1", 0))
+        taken.listen(1)
+        port = taken.getsockname()[1]
+        httpd = web_server.bind("127.0.0.1", port)
+        self.addCleanup(httpd.server_close)
+        self.assertEqual(httpd.server_address[1], port + 1)
 
     def test_stale_state_file_is_ignored(self):
         sf = web_server.state_path()
