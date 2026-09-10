@@ -101,6 +101,20 @@ class Handler(BaseHTTPRequestHandler):
     # --- 라우팅 ---
 
     def do_GET(self):
+        try:
+            self._get()
+        except Exception:
+            log.exception("GET %s failed", self.path)
+            self._err(500, "internal error")
+
+    def do_POST(self):
+        try:
+            self._post()
+        except Exception:
+            log.exception("POST %s failed", self.path)
+            self._err(500, "internal error")
+
+    def _get(self):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/":
@@ -115,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._effective((q.get("project") or [""])[0])
         self._err(404, "not found")
 
-    def do_POST(self):
+    def _post(self):
         if urlparse(self.path).path == "/api/shutdown":
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
@@ -129,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = UI.read_bytes()
         except OSError:
-            return self._send(503, b"UI not built", "text/plain; charset=utf-8")
+            return self._err(503, "UI not built")
         self._send(200, body, "text/html; charset=utf-8")
 
     def _scan(self):
@@ -150,7 +164,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._err(409, "scan first")
         try:
             path = _norm(raw)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             return self._err(400, f"bad path: {e}")
         if path not in allowed:
             return self._err(404, "not in scan result")
@@ -165,13 +179,10 @@ class Handler(BaseHTTPRequestHandler):
         if not raw:
             return self._err(400, "project required")
         with _LOCK:
-            scanned = _scan is not None
             projects = (_scan or {}).get("projects") or []
-        if not scanned:
-            return self._err(409, "scan first")
         try:
             path = _norm(raw)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             return self._err(400, f"bad path: {e}")
         for p in projects:
             if p.get("path") == path:
@@ -211,6 +222,8 @@ def bind(host: str, port: int) -> ThreadingHTTPServer | None:
 
 
 def main(argv=None) -> int:
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr,
+                        format="%(levelname)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(prog="config-map", description="claude-config-map 로컬 서버")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true")
@@ -231,6 +244,8 @@ def main(argv=None) -> int:
         return 1
 
     url = "http://{}:{}".format(args.host, httpd.server_address[1])
+    # ponytail: live_url() 확인과 아래 쓰기 사이에 다른 프로세스가 끼어들 수 있다.
+    # 동시 기동은 드물어 프로세스 간 잠금 생략, 필요 시 O_EXCL 생성으로 교체.
     sf = state_path()
     sf.parent.mkdir(parents=True, exist_ok=True)
     sf.write_text(json.dumps({"port": httpd.server_address[1], "pid": os.getpid(),
@@ -245,9 +260,10 @@ def main(argv=None) -> int:
         pass
     finally:
         httpd.server_close()
-        try:
-            sf.unlink()
-        except OSError:
+        try:  # 남의 상태 파일은 지우지 않는다 — 내 pid가 적혀 있을 때만
+            if json.loads(sf.read_text(encoding="utf-8")).get("pid") == os.getpid():
+                sf.unlink()
+        except (OSError, ValueError):
             pass
     return 0
 
