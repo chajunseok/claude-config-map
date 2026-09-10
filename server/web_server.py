@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
@@ -146,6 +146,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._file((q.get("path") or [""])[0])
         if u.path == "/api/effective":
             return self._effective((q.get("project") or [""])[0])
+        if u.path == "/api/sections":
+            return self._sections((q.get("path") or [""])[0])
+        if u.path == "/api/rules":
+            return self._rules((q.get("project") or [""])[0])
+        if u.path == "/api/compare":
+            return self._compare((q.get("title") or [""])[0])
         if u.path.startswith("/ui/"):
             return self._static(unquote(u.path[len("/ui/"):]))
         self._err(404, "not found")
@@ -159,13 +165,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
-        if path in ("/api/validate", "/api/save", "/api/toggle"):
+        handlers = {"/api/validate": self._validate, "/api/save": self._save,
+                    "/api/save-range": self._save_range, "/api/toggle": self._toggle}
+        if path in handlers:
             body = self._body()
             if body is None:
                 return
-            if path == "/api/validate":
-                return self._validate(body)
-            return self._save(body) if path == "/api/save" else self._toggle(body)
+            return handlers[path](body)
         self._err(404, "not found")
 
     def _body(self) -> dict | None:
@@ -265,26 +271,81 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, result)
 
     # ponytail: resolve와 open 사이 심링크 교체는 방어하지 않음 — 127.0.0.1 전용·본인 파일 읽기 도구. 필요 시 os.open(O_NOFOLLOW)+fstat 비교로 교체
-    def _file(self, raw: str):
+    def _readable(self, raw: str) -> str | None:
+        """읽기 대상 경로 검사(스캔 전 409 / 허용 밖 404). 실패면 응답까지 보내고 None."""
         if not raw:
-            return self._err(400, "path required")
+            self._err(400, "path required")
+            return None
         with _LOCK:
             scanned = _scan is not None
             allowed = _allowed
         if not scanned:
-            return self._err(409, "scan first")
+            self._err(409, "scan first")
+            return None
         try:
             path = _norm(raw)
         except (OSError, ValueError):
-            return self._err(404, "not found")
+            self._err(404, "not found")
+            return None
         if path not in allowed:
-            return self._err(404, "not in scan result")
+            self._err(404, "not in scan result")
+            return None
+        return path
+
+    def _file(self, raw: str):
+        path = self._readable(raw)
+        if path is None:
+            return
         meta = core.read_text(path)
         if meta is None:
             return self._err(404, "not found")
         if "error" in meta:
             return self._err(500, meta["error"])
-        self._json(200, {"path": path, **meta})
+        out = {"path": path, **meta}
+        if path.lower().endswith(".md"):  # 별도 요청 없이 접기가 되도록 같이 실어 준다
+            out["sections"] = core.parse_sections(meta["text"])
+        self._json(200, out)
+
+    def _sections(self, raw: str):
+        path = self._readable(raw)
+        if path is None:
+            return
+        if not path.lower().endswith(".md"):
+            return self._err(400, "not markdown")
+        meta = core.read_text(path)
+        if meta is None:
+            return self._err(404, "not found")
+        if "error" in meta:
+            return self._err(500, meta["error"])
+        self._json(200, {"path": path, "mtime": meta["mtime"],
+                         "sections": core.parse_sections(meta["text"])})
+
+    def _rules(self, raw: str):
+        project = self._project(raw)
+        if project is None:
+            return
+        files = []
+        for f in core.effective_rules(project):
+            e = dict(f, sections=[])
+            meta = core.read_text(f["path"])
+            if meta is None:
+                e["error"] = "not found"
+            elif "error" in meta:
+                e["error"] = meta["error"]
+            else:
+                e["sections"] = core.parse_sections(meta["text"])
+            files.append(e)
+        self._json(200, {"files": files, "conflicts": core.section_conflicts(files)})
+
+    def _compare(self, raw: str):
+        if not raw.strip():
+            return self._err(400, "title required")
+        with _LOCK:
+            scan = _scan
+        if scan is None:
+            return self._err(409, "scan first")
+        self._json(200, {"title": raw.strip(),
+                         "matches": core.compare_sections(scan, raw)})
 
     def _validate(self, body: dict):
         text = body.get("text")
@@ -313,8 +374,42 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(409, {"error": "modified on disk", "mtime": r["mtime"]})
         if any(i["level"] == "error" for i in r["issues"]):
             return self._json(422, {"error": "validation failed", "issues": r["issues"]})
+        out = {"path": path, "mtime": r["mtime"], "size": r["size"],
+               "backup": r["backup"], "issues": r["issues"]}
+        if path.lower().endswith(".md"):
+            out["sections"] = core.parse_sections(text)
+        self._json(200, out)
+
+    def _save_range(self, body: dict):
+        start, end = body.get("start"), body.get("end")
+        text, mtime = body.get("text"), body.get("mtime")
+        # ponytail: 본문 형태 오류는 전부 한 문자열로 — UI는 어차피 같은 처리를 한다.
+        # bool은 int의 하위형이라 따로 막는다.
+        if (isinstance(start, bool) or isinstance(end, bool) or isinstance(mtime, bool)
+                or not isinstance(start, int) or not isinstance(end, int)
+                or not isinstance(mtime, (int, float))
+                or start < 0 or start > end
+                or not isinstance(text, str) or text == ""):
+            return self._err(400, "invalid range")
+        path = self._target(body.get("path"))
+        if path is None:
+            return
+        try:
+            r = core.replace_range(path, start, end, text, mtime)
+        except FileNotFoundError:
+            return self._err(404, "not found")
+        except OSError as e:
+            log.warning("save-range failed %s: %s", path, e)
+            return self._err(500, "save failed")
+        if r.get("bad_range"):
+            return self._err(400, "invalid range")
+        if r.get("conflict"):
+            return self._json(409, {"error": "modified on disk", "mtime": r["mtime"]})
+        if any(i["level"] == "error" for i in r["issues"]):
+            return self._json(422, {"error": "validation failed", "issues": r["issues"]})
         self._json(200, {"path": path, "mtime": r["mtime"], "size": r["size"],
-                         "backup": r["backup"], "issues": r["issues"]})
+                         "backup": r["backup"], "issues": r["issues"],
+                         "sections": r["sections"]})
 
     def _toggle(self, body: dict):
         with _LOCK:
@@ -357,19 +452,27 @@ class Handler(BaseHTTPRequestHandler):
         self._json(200, {"path": r["path"], "created": r["created"], "backup": r["backup"],
                          "section": section, "key": key, "value": r["value"]})
 
-    def _effective(self, raw: str):
+    def _project(self, raw: str) -> dict | None:
+        """스캔 결과의 프로젝트 항목. 실패면 응답까지 보내고 None."""
         if not raw:
-            return self._err(400, "project required")
+            self._err(400, "project required")
+            return None
         with _LOCK:
             projects = (_scan or {}).get("projects") or []
         try:
             path = _norm(raw)
         except (OSError, ValueError):
-            return self._err(404, "unknown project")
+            path = None
         for p in projects:
             if p.get("path") == path:
-                return self._json(200, core.effective_rules(p))
+                return p
         self._err(404, "unknown project")
+        return None
+
+    def _effective(self, raw: str):
+        project = self._project(raw)
+        if project is not None:
+            self._json(200, core.effective_rules(project))
 
 
 def live_url() -> str | None:

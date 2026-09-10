@@ -85,10 +85,40 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 #pathline{flex:none;font:11px/1.6 var(--mono);color:var(--muted);padding:4px 12px;border-bottom:1px solid var(--bd);word-break:break-all}
 #panel{flex:1;overflow:auto;min-width:0}
 .code{font:12px/1.7 var(--mono);padding:8px 0}
-.line{display:grid;grid-template-columns:40px 1fr}
-.line .ln{text-align:right;padding-right:8px;color:var(--muted);user-select:none;white-space:pre}
+/* 줄번호 칸(접기 토글 + 번호) · 본문 · (헤딩이면) 섹션 편집 버튼 */
+.line{display:grid;grid-template-columns:54px minmax(0,1fr) auto}
+.line .ln{display:flex;align-items:flex-start;justify-content:flex-end;gap:2px;
+          padding-right:8px;color:var(--muted);user-select:none;white-space:pre}
 .line .src{min-width:0;padding-left:10px;color:var(--fg);white-space:pre-wrap;word-break:break-all}
-.code pre.rest{margin:0;padding-left:50px;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
+.code pre.rest{margin:0;padding-left:64px;white-space:pre-wrap;word-break:break-all;color:var(--fg)}
+/* 섹션 접기 */
+.line .fold{font-size:9px;line-height:inherit;color:var(--muted);padding:0}
+.line .fold:hover{color:var(--fg)}
+.line:hover{background:var(--hover)}
+.line.hl{background:var(--sel)}
+.line .seced{font-size:11px;color:var(--acc);padding:0 8px;visibility:hidden;white-space:nowrap}
+.line:hover .seced,.line .seced:focus{visibility:visible}
+.folded{padding-left:64px;color:var(--muted)}
+/* 섹션 편집 중 표시 */
+.rangelbl{font-size:11px;color:var(--acc)}
+/* 규칙 사이드바 섹션 행 */
+.secrow{display:flex;align-items:center;min-width:0;border-left:3px solid transparent}
+.secrow:hover{background:var(--hover)}
+.secrow.conf{border-left-color:var(--warn)}
+.secbtn{flex:1;min-width:0;display:flex;align-items:center;gap:6px;text-align:left;padding:2px 4px;font-size:12px;color:var(--val)}
+.secbtn .t{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmpico{flex:none;padding:2px 8px;color:var(--muted)}
+.cmpico:hover{color:var(--acc)}
+/* 비교 가상 탭 */
+.cmp{display:flex;flex-direction:column;gap:10px;padding:10px 12px}
+.cmpitem{border:1px solid var(--bd);border-radius:5px;overflow:hidden}
+.cmphd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;text-align:left;
+       padding:5px 8px;background:var(--bar);border-bottom:1px solid var(--bd)}
+.cmphd:hover{background:var(--hover)}
+.cmphd .t{font-weight:600}
+.cmphd .p{font:11px/1.5 var(--mono);color:var(--muted);word-break:break-all}
+.cmpbody{margin:0;padding:8px 10px;font:12px/1.6 var(--mono);color:var(--fg);
+         white-space:pre-wrap;word-break:break-all;max-height:24em;overflow:auto}
 .pad{padding:12px 14px}
 .hint{color:var(--muted)}
 /* 뷰 역할 한 줄 설명 */
@@ -138,6 +168,17 @@ select[disabled]{color:var(--muted);cursor:default}
 .kvgrid .v{color:var(--val);word-break:break-all}
 .kvgrid .v.shared{color:var(--green)}
 .kvgrid .v.warn{color:var(--warn)}
+/* 인스펙터 충돌 */
+.cflist{display:flex;flex-direction:column;gap:4px}
+.cfitem{display:flex;align-items:center;gap:6px;text-align:left;width:100%;color:var(--val)}
+.cfitem .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfbodies{display:flex;flex-direction:column;gap:6px;margin:2px 0 6px}
+.cfcard{border:1px solid var(--bd);border-radius:4px;overflow:hidden}
+.cfhd{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;text-align:left;padding:3px 6px;background:var(--bar)}
+.cfhd:hover{background:var(--hover)}
+.cfhd .p{font:10px/1.5 var(--mono);color:var(--muted);word-break:break-all}
+.cfbody{margin:0;padding:5px 7px;font:11px/1.5 var(--mono);color:var(--val);
+        white-space:pre-wrap;word-break:break-all;max-height:14em;overflow:auto}
 .efflist,.hooklist{display:flex;flex-direction:column;gap:5px}
 .effitem{display:flex;gap:6px;align-items:baseline;color:var(--val);word-break:break-all}
 .effitem .n{color:var(--acc);font:11px/1.5 var(--mono);flex:none}

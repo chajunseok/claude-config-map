@@ -98,6 +98,44 @@ function skillCtrls(c){
   return row;
 }
 
+/* 충돌 두 섹션을 세로로 나란히 — 본문은 /api/file 응답 캐시에서 잘라 쓴다 */
+function conflictBodies(c){
+  var box = el("div","cfbodies");
+  (c.where || []).forEach(function(w){
+    var card = el("div","cfcard");
+    var h = el("button","cfhd");
+    h.appendChild(badge(SCOPE_KO[w.scope] || w.scope));
+    h.appendChild(el("span","p", w.path + " · L" + (w.start+1) + "–L" + w.end));
+    h.title = w.path + " — 이 줄로 이동";
+    h.onclick = function(){ openFile(w.path, {line:w.start}); };
+    card.appendChild(h);
+    var f = S.fileCache[w.path];
+    if(!f){
+      card.appendChild(el("div","hint","불러오는 중…"));
+      ensureCache(w.path);
+    }else if(f.error){
+      card.appendChild(el("div","err", "읽지 못했습니다: " + f.error));
+    }else{
+      card.appendChild(el("pre","cfbody",
+        String(f.text || "").split("\n").slice(w.start, w.end).join("\n")));
+    }
+    box.appendChild(card);
+  });
+  return box;
+}
+// ponytail: 캐시 무효화는 재스캔뿐 — 파일을 열거나 저장하면 그 경로만 갱신된다
+async function ensureCache(path){
+  if(S.fileCache[path] || S.cacheBusy[path]) return;
+  S.cacheBusy[path] = true;
+  var sseq = S.sseq, f = null;
+  try{ f = await getJSON("/api/file?path="+encodeURIComponent(path)); }
+  catch(e){ f = {text:"", error:e.message}; }
+  delete S.cacheBusy[path];
+  if(S.dead || sseq !== S.sseq) return;
+  S.fileCache[path] = f;
+  renderInspector();
+}
+
 /* ---------- 인스펙터 ---------- */
 function section(parent, title){
   var s = el("section");
@@ -148,10 +186,14 @@ function renderInspector(){
     kvRow(g2, "출처", m.origin || "-");
     kvRow(g2, "공유", m.shared ? "팀 공유 (git 추적)" : "개인", m.shared ? "shared" : null);
     if(m.lazy) kvRow(g2, "적재", "지연 로드 (해당 폴더 작업 시)", "warn");
-    if(S.file){
+    if(S.file && isCompare(S.filePath)){
+      kvRow(g2, "비교 제목", cmpTitle(S.filePath));
+      kvRow(g2, "매치", len(S.file.matches) + "곳");
+    }else if(S.file){
       kvRow(g2, "크기", kb(S.file.size));
       kvRow(g2, "수정", ymd(S.file.mtime));
       kvRow(g2, "줄바꿈", (S.file.crlf ? "CRLF" : "LF") + " · BOM " + (S.file.bom ? "있음" : "없음"));
+      if(S.file.sections) kvRow(g2, "섹션", S.file.sections.length + "개");
     }else if(S.fileErr){
       kvRow(g2, "본문", "불러오지 못함", "warn");
     }else{
@@ -262,6 +304,27 @@ function renderInspector(){
       list2.appendChild(row);
     });
     es.appendChild(list2);
+  }
+  /* 충돌 — 같은 제목 섹션이 여러 파일에 (V5 warn) */
+  var cs = section(ins, "충돌");
+  var cflist = S.conflicts || [];
+  if(!S.project || S.project.exists === false) cs.appendChild(el("div","hint","프로젝트를 선택하세요."));
+  else if(!S.conflicts) cs.appendChild(el("div","hint", S.effErr ? "불러오지 못했습니다." : "불러오는 중…"));
+  else if(!cflist.length) cs.appendChild(el("div","hint","같은 제목의 섹션이 겹치지 않습니다."));
+  else{
+    var cl2 = el("div","cflist");
+    cflist.forEach(function(c){
+      var open = S.conflictSel === c.title;
+      var b = el("button","cfitem");
+      b.setAttribute("aria-expanded", String(open));
+      b.appendChild(el("span","arw", open ? "▾" : "▸"));
+      b.appendChild(el("span","t", c.title));
+      b.appendChild(badge(len(c.where) + "곳","warn"));
+      b.onclick = function(){ S.conflictSel = open ? null : c.title; renderInspector(); };
+      cl2.appendChild(b);
+      if(open) cl2.appendChild(conflictBodies(c));
+    });
+    cs.appendChild(cl2);
   }
   /* 이 프로젝트의 훅 */
   var hs = section(ins, "이 프로젝트의 훅");

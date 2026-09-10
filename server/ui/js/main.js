@@ -57,13 +57,15 @@ async function loadScan(){
   // 이전 선택 복원
   S.project = null; S.file = null; S.fileErr = null; S.filePath = null;
   S.eff = null; S.effErr = null; S.eseq++; S.selHook = null; S.selMcp = null;
-  S.tabs = S.tabs.filter(function(t){ return !!S.meta[t.path]; });
+  S.fileCache = Object.create(null); S.cacheBusy = Object.create(null);
+  // 비교 가상 탭은 스캔 메타에 없으므로 예외
+  S.tabs = S.tabs.filter(function(t){ return isCompare(t.path) || !!S.meta[t.path]; });
   if(prevProject){
     var found = (scan.projects||[]).filter(function(x){ return x.path === prevProject; })[0];
     if(found) S.project = found;
     else { S.msg = "재스캔 후 프로젝트가 사라져 선택을 해제했습니다: "+prevProject; S.msgOk = false; }
   }
-  if(prevFile && !S.meta[prevFile]){
+  if(prevFile && !isCompare(prevFile) && !S.meta[prevFile]){
     S.fileErr = "재스캔 후 파일이 사라졌습니다: "+prevFile;
     prevFile = null;
   }

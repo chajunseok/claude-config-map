@@ -5,7 +5,8 @@ function addTab(path){
   if(S.tabs.some(function(x){ return x.path === path; })) return;   // 이미 열린 탭은 위치 유지
   var m = S.meta[path] || {};
   var seg = String(path).split(/[\\/]/);
-  var t = {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
+  var t = isCompare(path) ? {path:path, name:"비교: "+cmpTitle(path), sub:"제목 비교"}
+                          : {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
   S.tabs.push(t);
   if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
 }
@@ -60,9 +61,11 @@ function syncProject(path){
   S.project = pr;
   loadEff();   // 트리·인스펙터 렌더는 openFile 이 이어서 수행
 }
-async function openFile(path){
+// opts.line: 렌더 후 그 줄로 스크롤 + 1.5초 하이라이트 (접혀 있으면 펼친다)
+async function openFile(path, opts){
   if(!guardEdit()) return;
-  syncProject(path);
+  opts = opts || {};
+  if(!isCompare(path)) syncProject(path);
   S.file = null; S.fileErr = null; S.filePath = path; S.issues = null;
   S.selHook = null; S.selMcp = null;   // 파일을 열면 훅·MCP 선택 해제
   addTab(path);
@@ -74,14 +77,35 @@ async function openFile(path){
   renderInspector();
   var file = null, err = null;
   try{
-    file = await getJSON("/api/file?path="+encodeURIComponent(path));
+    file = isCompare(path)
+      ? await getJSON("/api/compare?title="+encodeURIComponent(cmpTitle(path)))
+      : await getJSON("/api/file?path="+encodeURIComponent(path));
   }catch(e){
-    err = "파일을 불러오지 못했습니다: "+path+" — "+e.message;
+    err = (isCompare(path) ? "비교하지 못했습니다: "+cmpTitle(path) : "파일을 불러오지 못했습니다: "+path)
+        + " — " + e.message;
   }
   if(S.dead || sseq !== S.sseq || fseq !== S.fseq) return;
   S.file = file; S.fileErr = err;
+  if(file && !isCompare(path)) S.fileCache[path] = file;
   renderRaw();
   renderInspector();
+  if(opts.line != null) gotoLine(opts.line);
+}
+/* 줄로 이동 — 접힌 섹션 안이면 펼치고 다시 그린 뒤 1.5초 하이라이트 */
+function gotoLine(line){
+  var f = S.folds[S.filePath];
+  if(f){
+    var opened = false;
+    ((S.file && S.file.sections) || []).forEach(function(sec){
+      if(f[sec.start] && line > sec.start && line < sec.end){ delete f[sec.start]; opened = true; }
+    });
+    if(opened) renderRaw();
+  }
+  var row = document.querySelector('#panel .line[data-line="'+line+'"]');
+  if(!row) return;
+  row.scrollIntoView({block:"center"});
+  row.classList.add("hl");
+  setTimeout(function(){ row.classList.remove("hl"); }, 1500);
 }
 function renderRaw(){
   var p = panel();
@@ -94,19 +118,85 @@ function renderRaw(){
     pd.appendChild(el("p","hint", S.filePath ? "불러오는 중… "+S.filePath : "열린 파일이 없습니다."));
     return;
   }
+  if(isCompare(S.filePath)) return renderCompare(p);
   p.appendChild(readBar());
   if(S.issues && S.issues.length) p.appendChild(issueList(S.issues));
   var lines = (S.file.text || "").split("\n");
+  var heads = headMap(), folded = S.folds[S.filePath] || null;
   var box = el("div","code");
   // ponytail: 2000줄까지만 줄 단위 행, 나머지는 pre 한 덩어리 (행이 많으면 렌더가 느려짐)
   var n = Math.min(lines.length, MAX_LINE_ROWS);
   for(var i=0;i<n;i++){
-    var row = el("div","line");
-    row.appendChild(el("span","ln", String(i+1)));
-    row.appendChild(el("span","src", lines[i]));
-    box.appendChild(row);
+    var sec = heads[i];
+    box.appendChild(lineRow(i, lines[i], sec));
+    if(!sec || !folded || !folded[i]) continue;
+    var hid = Math.min(sec.end, lines.length) - i - 1;
+    if(hid <= 0) continue;
+    box.appendChild(el("div","folded", "… "+hid+"줄"));
+    i = Math.min(sec.end, n) - 1;      // 접힌 구간은 건너뛴다
   }
   if(lines.length > n) box.appendChild(el("pre","rest", lines.slice(n).join("\n")));
+  p.appendChild(box);
+}
+/* 헤딩 줄번호 → 섹션 (preamble 은 접기 대상 아님) */
+function headMap(){
+  var out = Object.create(null);
+  ((S.file && S.file.sections) || []).forEach(function(sec){ if(sec.level > 0) out[sec.start] = sec; });
+  return out;
+}
+function toggleFold(start){
+  var f = S.folds[S.filePath] || (S.folds[S.filePath] = Object.create(null));
+  if(f[start]) delete f[start]; else f[start] = true;
+  renderRaw();
+}
+function foldAll(on){
+  var f = Object.create(null);
+  if(on) keys(headMap()).forEach(function(k){ f[k] = true; });
+  S.folds[S.filePath] = f;
+  renderRaw();
+}
+function lineRow(i, text, sec){
+  var row = el("div","line");
+  row.setAttribute("data-line", String(i));
+  var ln = el("span","ln");
+  if(sec){
+    var open = !(S.folds[S.filePath] || {})[i];
+    var fb = el("button","fold", open ? "▾" : "▸");
+    fb.setAttribute("aria-expanded", String(open));
+    fb.setAttribute("aria-label", (sec.title || "섹션") + " 접기·펼치기");
+    fb.onclick = function(){ toggleFold(i); };
+    ln.appendChild(fb);
+  }
+  ln.appendChild(el("span","lnn", String(i+1)));
+  row.appendChild(ln);
+  row.appendChild(el("span","src", text));
+  if(sec && !isPluginFile(S.filePath)){
+    var eb = el("button","seced","이 섹션 편집");
+    eb.onclick = function(){ startEdit(sec); };
+    row.appendChild(eb);
+  }
+  return row;
+}
+/* 비교 가상 탭 — 제목이 같은 섹션을 스택으로. 편집 없음 */
+function renderCompare(p){
+  var ms = (S.file && S.file.matches) || [];
+  var bar = el("div","tbar");
+  bar.appendChild(el("span","hint", "제목 비교 · " + cmpTitle(S.filePath) + " · " + ms.length + "곳"));
+  p.appendChild(bar);
+  if(!ms.length){ p.appendChild(el("div","pad")).appendChild(el("p","hint","같은 제목의 섹션이 없습니다.")); return; }
+  var box = el("div","cmp");
+  ms.forEach(function(m){
+    var card = el("div","cmpitem");
+    var h = el("button","cmphd");
+    h.appendChild(el("span","t", m.project || "전역"));
+    h.appendChild(badge(SCOPE_KO[m.scope] || m.scope));
+    h.appendChild(el("span","p", m.path + " · L" + (m.start+1) + "–L" + m.end));
+    h.title = m.path + " — 이 줄로 이동";
+    h.onclick = function(){ openFile(m.path, {line:m.start}); };
+    card.appendChild(h);
+    card.appendChild(el("pre","cmpbody", m.text || ""));
+    box.appendChild(card);
+  });
   p.appendChild(box);
 }
 
@@ -122,7 +212,11 @@ function tbtn(text, fn){ var b = el("button", null, text); b.onclick = fn; retur
 function readBar(){
   var bar = el("div","tbar");
   if(isPluginFile(S.filePath)) bar.appendChild(el("span","hint","읽기 전용 (플러그인)"));
-  else bar.appendChild(tbtn("편집", startEdit));
+  else bar.appendChild(tbtn("편집", function(){ startEdit(); }));
+  if(keys(headMap()).length){
+    bar.appendChild(tbtn("모두 접기", function(){ foldAll(true); }));
+    bar.appendChild(tbtn("모두 펼치기", function(){ foldAll(false); }));
+  }
   var m = S.meta[S.filePath] || {};
   if(m.shared) bar.appendChild(el("span","hint","팀 공유 (git 추적)"));
   return bar;
@@ -139,9 +233,15 @@ function issueList(issues){
   });
   return box;
 }
-function startEdit(){
-  if(!S.file || !S.filePath || isPluginFile(S.filePath)) return;
-  S.edit = {path:S.filePath, text:S.file.text || "", dirty:false,
+// sec 를 주면 그 섹션 줄만 편집 — 저장은 /api/save-range
+function startEdit(sec){
+  if(!S.file || !S.filePath || isPluginFile(S.filePath) || isCompare(S.filePath)) return;
+  var text = S.file.text || "", range = null;
+  if(sec && sec.title != null){
+    range = {start:sec.start, end:sec.end, title:sec.title};
+    text = text.split("\n").slice(sec.start, sec.end).join("\n");
+  }
+  S.edit = {path:S.filePath, text:text, range:range, dirty:false,
             issues:null, busy:false, conflict:false, msg:null, msgCls:""};
   S.issues = null;
   renderRaw();
@@ -167,6 +267,10 @@ function renderEdit(p){
   bar.appendChild(bV); bar.appendChild(bS); bar.appendChild(bC);
   var st = el("span","hint", e.dirty ? "수정됨" : "변경 없음");
   bar.appendChild(st);
+  if(e.range)
+    bar.appendChild(el("span","rangelbl",
+      "섹션 편집 중: " + (e.range.title || "(제목 없음)")
+      + " (L" + (e.range.start+1) + "–L" + e.range.end + ")"));
   wrap.appendChild(bar);
   if(m.shared) wrap.appendChild(el("div","sharewarn","git 추적 파일 — 커밋하면 팀 전체에 적용됨"));
   var msg = el("div","edmsg");
@@ -216,7 +320,7 @@ async function doValidate(){
   var path = e.path;
   editBusy("검증 중…");
   var res = null, err = null;
-  try{ res = await postJSON("/api/validate", {path:path, text:S.edit.text}); }
+  try{ res = await postJSON("/api/validate", {path:path, text:fullText(S.edit)}); }
   catch(ex){ err = ex.message; }
   if(!editAlive(path)) return;
   S.edit.busy = false;
@@ -238,10 +342,20 @@ async function doSave(){
     refreshEdit();
     return;
   }
-  var path = e.path, text = e.text;
+  var path = e.path, text = e.text, range = e.range;
+  if(range && !text.trim()){
+    e.msg = "섹션 본문이 비어 있습니다 — 섹션 삭제는 지원하지 않습니다."; e.msgCls = "bad";
+    refreshEdit();
+    return;
+  }
   editBusy("저장 중…");
   var res = null, err = null;
-  try{ res = await postJSON("/api/save", {path:path, text:text, mtime:(S.file && S.file.mtime)}); }
+  try{
+    res = range
+      ? await postJSON("/api/save-range", {path:path, mtime:(S.file && S.file.mtime),
+                                           start:range.start, end:range.end, text:text})
+      : await postJSON("/api/save", {path:path, text:text, mtime:(S.file && S.file.mtime)});
+  }
   catch(ex){ err = ex.message; }
   if(!editAlive(path)) return;
   S.edit.busy = false;
@@ -252,9 +366,11 @@ async function doSave(){
   var b = res.body;
   if(res.status === 200){
     if(S.file && S.filePath === path){
-      S.file.text = text;
+      S.file.text = range ? spliceLines(S.file.text, range.start, range.end, text) : text;
       if(b.mtime != null) S.file.mtime = b.mtime;
       if(b.size != null) S.file.size = b.size;
+      if(b.sections) S.file.sections = b.sections;
+      S.fileCache[path] = S.file;
     }
     S.edit = null; ED = null;
     S.issues = (b.issues && b.issues.length) ? b.issues : null;   // warn 은 저장 후에도 남긴다
@@ -291,10 +407,38 @@ async function reReadFile(){
     S.edit.msg = "다시 읽지 못했습니다: " + err; S.edit.msgCls = "bad";
     return refreshEdit();
   }
-  if(S.filePath === path) S.file = file;
+  if(S.filePath === path){ S.file = file; S.fileCache[path] = file; }
   S.edit.conflict = false;
   S.edit.msg = "디스크 내용을 다시 읽었습니다. 편집본은 그대로이며, 저장하면 덮어씁니다.";
   S.edit.msgCls = "";
+  var moved = relocate(S.edit, file);
+  if(moved){
+    S.edit.msg = moved; S.edit.msgCls = "bad";
+    renderRaw();          // 전체 편집으로 바뀌면 textarea 내용이 달라져 다시 그린다
+    renderInspector();
+    return;
+  }
   refreshEdit();
   renderInspector();
+}
+// 섹션 편집 중 디스크가 바뀐 경우 — 같은 제목으로 범위를 다시 찾는다.
+// 못 찾으면 전체 편집으로 전환하되 편집본은 원래 줄 범위에 끼워 넣어 살린다.
+function relocate(e, file){
+  if(!e.range) return null;
+  var found = ((file && file.sections) || []).filter(function(s){
+    return s.level > 0 && s.title === e.range.title; })[0];
+  if(found){
+    e.range = {start:found.start, end:found.end, title:found.title};
+    return null;
+  }
+  var lines = String((file && file.text) || "").split("\n");
+  var st = Math.min(e.range.start, lines.length), en = Math.min(e.range.end, lines.length);
+  e.text = spliceLines(lines.join("\n"), st, en, e.text);
+  e.range = null;
+  return "섹션 제목을 디스크에서 찾지 못해 전체 편집으로 전환했습니다 — 원래 줄 범위에 편집본을 넣었으니 확인 후 저장하세요.";
+}
+// 섹션 편집이면 검증용 전문 합성
+function fullText(e){
+  if(!e.range) return e.text;
+  return spliceLines((S.file && S.file.text) || "", e.range.start, e.range.end, e.text);
 }

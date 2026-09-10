@@ -103,6 +103,18 @@ class ServerCase(unittest.TestCase):
         self.assertEqual(code, 200)
         return json.loads(body)
 
+    def post(self, path, obj=None, headers=None, raw=None):
+        data = raw if raw is not None else json.dumps(obj).encode("utf-8")
+        req = urllib.request.Request(
+            self.url + path, data=data, method="POST",
+            headers={"Content-Type": "application/json", **(headers or {})})
+        return get(req)
+
+    def file_mtime(self, f):
+        code, body, _ = get(self.url + "/api/file?path=" + f.as_posix())
+        self.assertEqual(code, 200)
+        return json.loads(body)["mtime"]
+
 
 
 class TestEndpoints(ServerCase):
@@ -401,18 +413,6 @@ class TestStaticFiles(ServerCase):
 class TestEditEndpoints(ServerCase):
     """POST /api/validate · /api/save 상태 코드 매트릭스."""
 
-    def post(self, path, obj=None, headers=None, raw=None):
-        data = raw if raw is not None else json.dumps(obj).encode("utf-8")
-        req = urllib.request.Request(
-            self.url + path, data=data, method="POST",
-            headers={"Content-Type": "application/json", **(headers or {})})
-        return get(req)
-
-    def file_mtime(self, f):
-        code, body, _ = get(self.url + "/api/file?path=" + f.as_posix())
-        self.assertEqual(code, 200)
-        return json.loads(body)["mtime"]
-
     def test_validate_before_scan_is_409(self):
         code, body, _ = self.post("/api/validate",
                                   {"path": self.allowed.as_posix(), "text": "x\n"})
@@ -658,6 +658,208 @@ class TestToggleEndpoint(ServerCase):
         self.assertFalse(self.settings().exists())
 
 
+class TestSectionEndpoints(ServerCase):
+    """GET /api/sections · /api/rules · /api/compare 와 POST /api/save-range 매트릭스."""
+
+    def setUp(self):
+        super().setUp()
+        self.allowed.write_bytes(b"# Rules\nbody\n## Sub\nmore\n")
+
+    def test_sections_before_scan_is_409(self):
+        code, body, _ = get(self.url + "/api/sections?path=" + self.allowed.as_posix())
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_sections_ok(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/sections?path=" + self.allowed.as_posix())
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["path"], self.allowed.resolve().as_posix())
+        self.assertEqual([s["title"] for s in d["sections"]], ["Rules", "Sub"])
+        self.assertIn("mtime", d)
+
+    def test_sections_non_markdown_is_400(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/sections?path=" + self.settings_file.as_posix())
+        self.assertEqual(code, 400)
+        self.assertEqual(json.loads(body)["error"], "not markdown")
+
+    def test_sections_outside_scan_is_404_and_missing_path_is_400(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/sections?path=" + self.outside.as_posix())
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not in scan result")
+
+        code, body, _ = get(self.url + "/api/sections")
+        self.assertEqual(code, 400)
+        self.assertEqual(json.loads(body)["error"], "path required")
+
+    def test_file_carries_sections_only_for_markdown(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/file?path=" + self.allowed.as_posix())
+        self.assertEqual(code, 200)
+        self.assertEqual([s["title"] for s in json.loads(body)["sections"]],
+                         ["Rules", "Sub"])
+
+        code, body, _ = get(self.url + "/api/file?path=" + self.settings_file.as_posix())
+        self.assertEqual(code, 200)
+        self.assertNotIn("sections", json.loads(body))
+
+    def test_rules_with_conflict(self):
+        (self.home / ".claude" / "CLAUDE.md").write_text("# Rules\nglobal\n",
+                                                         encoding="utf-8")
+        self.scan()
+        code, body, _ = get(self.url + "/api/rules?project=" + self.proj_path)
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual([f["scope"] for f in d["files"]], ["global", "project"])
+        self.assertEqual([s["title"] for s in d["files"][1]["sections"]], ["Rules", "Sub"])
+        self.assertEqual([c["title"] for c in d["conflicts"]], ["Rules"])
+        self.assertEqual([w["scope"] for w in d["conflicts"][0]["where"]],
+                         ["global", "project"])
+
+    def test_rules_unreadable_file_keeps_going(self):
+        self.scan()
+        self.allowed.unlink()
+        code, body, _ = get(self.url + "/api/rules?project=" + self.proj_path)
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["files"][0]["sections"], [])
+        self.assertEqual(d["files"][0]["error"], "not found")
+
+    def test_rules_unknown_project_is_404(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/rules?project=" + self.outside.as_posix())
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "unknown project")
+
+    def test_compare_requires_title(self):
+        self.scan()
+        for q in ("", "?title=", "?title=%20%20"):
+            code, body, _ = get(self.url + "/api/compare" + q)
+            self.assertEqual(code, 400, q)
+            self.assertEqual(json.loads(body)["error"], "title required")
+
+    def test_compare_before_scan_is_409(self):
+        code, body, _ = get(self.url + "/api/compare?title=Rules")
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_compare_matches(self):
+        self.scan()
+        code, body, _ = get(self.url + "/api/compare?title=Rules")
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(d["title"], "Rules")
+        self.assertEqual([(m["project"], m["scope"]) for m in d["matches"]],
+                         [("proj", "project")])
+        self.assertEqual(d["matches"][0]["text"], "# Rules\nbody\n## Sub\nmore\n")
+
+        code, body, _ = get(self.url + "/api/compare?title=Nope")
+        self.assertEqual(json.loads(body)["matches"], [])
+
+    # --- POST /api/save-range ---
+
+    def range_body(self, **kw):
+        b = {"path": self.allowed.as_posix(), "mtime": self.file_mtime(self.allowed),
+             "start": 0, "end": 1, "text": "# Renamed\n"}
+        b.update(kw)
+        return b
+
+    def test_save_range_ok(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range", self.range_body())
+        self.assertEqual(code, 200)
+        d = json.loads(body)
+        self.assertEqual(self.allowed.read_bytes(), b"# Renamed\nbody\n## Sub\nmore\n")
+        self.assertEqual([s["title"] for s in d["sections"]], ["Renamed", "Sub"])
+        self.assertEqual(d["issues"], [])
+        self.assertEqual(d["size"], self.allowed.stat().st_size)
+        self.assertTrue(Path(d["backup"]).is_file())
+
+    def test_save_range_before_scan_is_409(self):
+        code, body, _ = self.post("/api/save-range",
+                                  {"path": self.allowed.as_posix(), "mtime": 1.0,
+                                   "start": 0, "end": 1, "text": "x\n"})
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "scan first")
+
+    def test_save_range_invalid_range_is_400(self):
+        self.scan()
+        cases = [{"start": "0"}, {"end": None}, {"start": 2, "end": 1}, {"start": -1},
+                 {"text": 5}, {"text": ""}, {"mtime": "now"}, {"start": True},
+                 {"start": 0, "end": 99}]
+        for kw in cases:
+            code, body, _ = self.post("/api/save-range", self.range_body(**kw))
+            self.assertEqual(code, 400, kw)
+            self.assertEqual(json.loads(body)["error"], "invalid range", kw)
+        self.assertEqual(self.allowed.read_bytes(), b"# Rules\nbody\n## Sub\nmore\n")
+
+    def test_save_range_conflict_is_409(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range", self.range_body(mtime=1.0))
+        self.assertEqual(code, 409)
+        self.assertEqual(json.loads(body)["error"], "modified on disk")
+        self.assertEqual(self.allowed.read_bytes(), b"# Rules\nbody\n## Sub\nmore\n")
+
+    def test_save_range_validation_failure_is_422(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range", {
+            "path": self.settings_file.as_posix(), "mtime": self.file_mtime(self.settings_file),
+            "start": 0, "end": 1, "text": "{bad"})
+        self.assertEqual(code, 422)
+        d = json.loads(body)
+        self.assertEqual(d["error"], "validation failed")
+        self.assertEqual(d["issues"][0]["rule"], "V1")
+        self.assertEqual(self.settings_file.read_text(encoding="utf-8"), "{}\n")
+
+    def test_save_range_outside_scan_is_404(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range",
+                                  self.range_body(path=self.outside.as_posix(), mtime=1.0))
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not in scan result")
+
+    def test_save_range_plugin_file_is_403(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range",
+                                  self.range_body(path=self.plugin_skill.as_posix(),
+                                                  mtime=self.file_mtime(self.plugin_skill)))
+        self.assertEqual(code, 403)
+        self.assertEqual(json.loads(body)["error"], "plugin files are read-only")
+        self.assertEqual(self.plugin_skill.read_text(encoding="utf-8"), "# skill\n")
+
+    def test_save_range_foreign_origin_is_403(self):
+        self.scan()
+        code, body, _ = self.post("/api/save-range", self.range_body(),
+                                  headers={"Origin": "http://evil.example"})
+        self.assertEqual(code, 403)
+        self.assertEqual(json.loads(body)["error"], "forbidden origin")
+        self.assertEqual(self.allowed.read_bytes(), b"# Rules\nbody\n## Sub\nmore\n")
+
+    def test_save_range_missing_file_is_404(self):
+        self.scan()
+        body_obj = self.range_body()
+        self.allowed.unlink()
+        code, body, _ = self.post("/api/save-range", body_obj)
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "not found")
+
+    def test_save_markdown_carries_sections(self):
+        self.scan()
+        code, body, _ = self.post("/api/save", {
+            "path": self.allowed.as_posix(), "mtime": self.file_mtime(self.allowed),
+            "text": "# One\n## Two\n"})
+        self.assertEqual(code, 200)
+        self.assertEqual([s["title"] for s in json.loads(body)["sections"]], ["One", "Two"])
+
+        code, body, _ = self.post("/api/save", {
+            "path": self.settings_file.as_posix(),
+            "mtime": self.file_mtime(self.settings_file), "text": "{}\n"})
+        self.assertEqual(code, 200)
+        self.assertNotIn("sections", json.loads(body))
+
 class TestVersionGuard(unittest.TestCase):
     """sys.version_info는 patch가 어려워 소스 배치만 검증한다 (가드가 import보다 먼저)."""
 
@@ -671,6 +873,12 @@ class TestVersionGuard(unittest.TestCase):
         src = ast.unparse(guard)
         self.assertIn("https://www.python.org/downloads/", src)
         self.assertIn("sys.exit(2)", src)
+
+    def test_plugin_manifest_version_matches(self):
+        repo = Path(web_server.__file__).resolve().parents[1]
+        data = json.loads((repo / ".claude-plugin" / "plugin.json")
+                          .read_text(encoding="utf-8"))
+        self.assertEqual(data["version"], web_server.VERSION)
 
 
 if __name__ == "__main__":
