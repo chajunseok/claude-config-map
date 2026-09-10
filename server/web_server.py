@@ -25,7 +25,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
