@@ -1,12 +1,19 @@
-"""claude-config-map 스캔 로직 (F1, F2). 읽기 전용 — 파일을 쓰지 않는다."""
+"""claude-config-map 스캔 로직 (F1, F2)과 검증·저장 (F4, F5).
+
+스캔은 읽기 전용이고, 파일을 쓰는 곳은 save()/_backup() 둘뿐이다.
+"""
 
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -327,17 +334,22 @@ def _scan_project(path, coverage: str = "full", coverage_reason: str | None = No
 
 
 def _imports(md_path) -> list:
-    """CLAUDE.md 본문의 `@경로` import 1단계. 실존 여부만 기록.
-
-    상대 경로는 그 CLAUDE.md의 부모 디렉터리 기준으로 해석한다.
-
-    # ponytail: 줄 시작 `@` 토큰만 본다. 중첩 import는 따라가지 않는다 (PRD S5).
-    """
+    """CLAUDE.md 파일의 `@경로` import 1단계. 실존 여부만 기록."""
     meta = read_text(md_path)
     if not meta or "text" not in meta:
         return []
+    return _imports_of_text(meta["text"], md_path)
+
+
+def _imports_of_text(text: str, md_path) -> list:
+    """본문 텍스트의 `@경로` import 1단계. 저장 전 본문(V4)도 같은 로직을 쓴다.
+
+    상대 경로는 그 md 파일의 부모 디렉터리 기준으로 해석한다.
+
+    # ponytail: 줄 시작 `@` 토큰만 본다. 중첩 import는 따라가지 않는다 (PRD S5).
+    """
     out = []
-    for line in meta["text"].splitlines():
+    for no, line in enumerate(text.splitlines(), 1):
         s = line.strip()
         if not s.startswith("@") or len(s) < 2:
             continue
@@ -345,7 +357,7 @@ def _imports(md_path) -> list:
         target = _expand(token)
         if not target.is_absolute():
             target = _expand(md_path).parent / token
-        out.append({"from": _p(md_path), "raw": token,
+        out.append({"from": _p(md_path), "raw": token, "line": no,
                     "path": _p(target), "exists": target.exists()})
     return out
 
@@ -630,3 +642,193 @@ def _scan() -> dict:
         "hooks": hook_flows(sources),
         "errors": errors(),
     }
+
+
+# --- F4 검증 -------------------------------------------------------------
+
+# 첫 토큰이 이 확장자면 경로로 본다 (슬래시가 없는 `hook.py` 형태)
+SCRIPT_SUFFIXES = frozenset({".py", ".sh", ".js", ".cmd", ".ps1"})
+# 마크다운 상대 링크: `](./x)` `](../x)` 만. 절대 URL·앵커는 잡히지 않는다
+_REL_LINK = re.compile(r"\]\((\.{1,2}/[^)\s]+)\)")
+
+
+def _issue(level: str, rule: str, message: str, line=None) -> dict:
+    return {"level": level, "rule": rule, "line": line, "message": message}
+
+
+def _md_kind(p: Path) -> str | None:
+    """frontmatter 규칙이 붙는 마크다운 종류. 그 외는 None."""
+    if p.name == "SKILL.md":
+        return "skill"
+    parts = {x.lower() for x in p.parts[:-1]}
+    if "agents" in parts:
+        return "agent"
+    if "commands" in parts:
+        return "command"
+    return None
+
+
+def _settings_base(p: Path) -> Path:
+    """settings 파일의 상대 경로 기준 디렉터리. 전역이면 `~/.claude`, 프로젝트면 루트."""
+    c = home() / ".claude"
+    if p.parent.resolve() == c.resolve():
+        return c
+    if p.parent.name == ".claude":
+        return p.parent.parent
+    return p.parent
+
+
+def _command_path(cmd: str) -> str | None:
+    """훅 명령의 첫 토큰이 '경로처럼 보이면' 그 토큰. 아니면 None.
+
+    # ponytail: 셸 파싱을 흉내내지 않는다. 첫 토큰만 보고, `$`/`%`가 있으면
+    # 환경변수 확장이 필요한 명령이라 검사 자체를 건너뛴다 (§11.4 — 실행하지 않는다).
+    """
+    try:
+        tokens = shlex.split(cmd, posix=False)
+    except ValueError:
+        tokens = cmd.split()
+    if not tokens:
+        return None
+    token = tokens[0].strip("'\"")
+    if not token or "$" in token or "%" in token:
+        return None
+    if "/" in token or "\\" in token or Path(token).suffix.lower() in SCRIPT_SUFFIXES:
+        return token
+    return None
+
+
+def _v3(p: Path, data: dict) -> list:
+    out = []
+    base = _settings_base(p)
+    for flow in hook_flows([{"source": _p(p), "hooks": data.get("hooks")}]):
+        for cmd in flow["commands"]:
+            token = _command_path(cmd) if isinstance(cmd, str) else None
+            if token is None:
+                continue
+            target = _expand(token)
+            if not target.is_absolute():
+                target = base / token
+            if not target.exists():
+                out.append(_issue("error", "V3",
+                                  f"{flow['event']} 훅 명령의 파일이 없습니다: {token}"))
+    return out
+
+
+def _v6(p: Path, data: dict) -> list:
+    flows = hook_flows([{"source": _p(p), "hooks": data.get("hooks")}])
+    events = sorted({f["event"] for f in flows if f.get("warn") == "duplicate-star"})
+    return [_issue("warn", "V6",
+                   f"{e}: `*` 매처와 구체 매처가 함께 있어 훅이 중복 발화합니다")
+            for e in events]
+
+
+def _v4(p: Path, text: str) -> list:
+    out = []
+    for imp in _imports_of_text(text, p):
+        if not imp["exists"]:
+            out.append(_issue("error", "V4", f"@import 대상이 없습니다: {imp['raw']}",
+                              imp["line"]))
+    for no, line in enumerate(text.splitlines(), 1):
+        for raw in _REL_LINK.findall(line):
+            target = p.parent / raw.split("#", 1)[0]
+            if not target.exists():
+                out.append(_issue("error", "V4", f"링크 대상이 없습니다: {raw}", no))
+    return out
+
+
+def validate(path, text: str) -> list:
+    """저장 전 검증. Issue 목록 (`error`가 하나라도 있으면 저장 차단)."""
+    p = _expand(path)
+    if p.suffix.lower() == ".json":
+        try:
+            data = json.loads(text)
+        except ValueError as e:
+            return [_issue("error", "V1", f"JSON 파싱 실패: {getattr(e, 'msg', e)}",
+                           getattr(e, "lineno", None))]
+        if not (p.name.startswith("settings") and isinstance(data, dict)):
+            return []
+        return _v3(p, data) + _v6(p, data)
+
+    if p.suffix.lower() != ".md":
+        return []
+    out = []
+    kind = _md_kind(p)
+    if kind:
+        fm = parse_frontmatter(text)
+        # commands/*.md의 name은 파일명이 대신한다 (§F4 V2)
+        need = ("description",) if kind == "command" else ("name", "description")
+        missing = [k for k in need if not fm.get(k)]
+        if missing:
+            out.append(_issue("error", "V2",
+                              "frontmatter 필수 키가 없습니다: " + ", ".join(missing)))
+    return out + _v4(p, text)
+
+
+# --- F5 저장 -------------------------------------------------------------
+
+BACKUP_KEEP = 10
+
+
+def backup_root() -> Path:
+    return home() / ".claude" / "config-map" / "backups"
+
+
+def _backup(path) -> str:
+    """원본 바이트를 백업 폴더에 복사하고 최근 BACKUP_KEEP개만 남긴다.
+
+    # ponytail: 파일당 폴더 이름은 정규 경로 sha1 앞 16자, 파일명은 UTC 타임스탬프.
+    # 같은 마이크로초에 두 번 저장하면 덮어쓴다 — 단일 사용자 도구라 허용.
+    """
+    p = _expand(path)
+    d = backup_root() / hashlib.sha1(_p(p).encode("utf-8")).hexdigest()[:16]
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f") + ".bak")
+    shutil.copy2(p, dest)
+    for old in sorted(d.glob("*.bak"))[:-BACKUP_KEEP]:
+        try:
+            old.unlink()
+        except OSError as e:
+            log.warning("백업 정리 실패 %s: %s", old, e)
+    return dest.resolve().as_posix()
+
+
+def save(path, text: str, expected_mtime=None) -> dict:
+    """검증 → V7 mtime 비교 → 백업 → 원자적 쓰기.
+
+    - 검증 error가 있으면 `{"issues": [...]}` 만 돌려주고 쓰지 않는다.
+    - mtime이 어긋나면 `{"conflict": True, "mtime": 현재}`.
+    - 성공하면 `{"mtime", "size", "backup", "issues"(warn만)}`.
+    """
+    p = _expand(path)
+    issues = validate(p, text)
+    if any(i["level"] == "error" for i in issues):
+        return {"issues": issues}
+
+    raw = p.read_bytes()  # 사라졌으면 FileNotFoundError를 그대로 올린다
+    st = p.stat()
+    if expected_mtime is not None and abs(st.st_mtime - float(expected_mtime)) > 1e-6:
+        return {"conflict": True, "mtime": st.st_mtime}
+
+    body = text.replace("\r\n", "\n")
+    if b"\r\n" in raw:  # 원본 줄바꿈·BOM은 서버가 현재 파일에서 다시 판정한다
+        body = body.replace("\n", "\r\n")
+    data = body.encode("utf-8")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        data = b"\xef\xbb\xbf" + data
+
+    backup = _backup(p)
+    tmp = tempfile.NamedTemporaryFile(dir=p.parent, prefix=".config-map-", delete=False)
+    try:
+        tmp.write(data)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp.close()
+        os.replace(tmp.name, p)
+    except BaseException:
+        tmp.close()
+        Path(tmp.name).unlink(missing_ok=True)
+        raise
+    st = p.stat()
+    return {"mtime": st.st_mtime, "size": st.st_size, "backup": backup,
+            "issues": [i for i in issues if i["level"] != "error"]}
