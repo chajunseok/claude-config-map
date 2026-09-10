@@ -4,9 +4,9 @@ import sys
 
 if sys.version_info < (3, 11):
     sys.stderr.write(
-        "config-map은 Python 3.11 이상이 필요합니다. 현재: %s\n"
-        "https://www.python.org/downloads/ 에서 설치한 뒤 새 터미널에서"
-        " /config-map 을 다시 실행하세요.\n" % sys.version.split()[0])
+        "config-map requires Python 3.11 or newer (found %s).\n"
+        "Install it from https://www.python.org/downloads/ and run"
+        " /config-map again in a new terminal.\n" % sys.version.split()[0])
     sys.exit(2)
 
 import argparse
@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import assist  # noqa: E402
 import core  # noqa: E402
 
-VERSION = "0.6.2"
+VERSION = "0.7.0"
 MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
@@ -583,16 +583,19 @@ def bind(host: str, port: int) -> ThreadingHTTPServer | None:
 def main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, stream=sys.stderr,
                         format="%(levelname)s %(name)s %(message)s")
-    ap = argparse.ArgumentParser(prog="config-map", description="claude-config-map 로컬 서버")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--no-browser", action="store_true")
-    ap.add_argument("--host", default="127.0.0.1", help="테스트용. 기본 127.0.0.1")
+    ap = argparse.ArgumentParser(prog="config-map",
+                                 description="claude-config-map local server")
+    ap.add_argument("--port", type=int, default=8765,
+                    help="Port to listen on. Moves to the next free port if taken. Default 8765")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="Print the URL without opening a browser")
+    ap.add_argument("--host", default="127.0.0.1", help="For testing. Default 127.0.0.1")
     args = ap.parse_args(argv)
 
     sf = state_path()
     lock = sf.with_suffix(".lock")
     if not _acquire(lock):
-        sys.stderr.write(f"기동 잠금을 얻지 못했습니다: {lock}\n")
+        sys.stderr.write(f"Could not acquire startup lock: {lock}\n")
         return 1
     try:  # 여기부터 server.json 쓰기까지가 동시 기동 직렬화 구간
         existing = live_url()
@@ -604,8 +607,8 @@ def main(argv=None) -> int:
 
         httpd = bind(args.host, args.port)
         if httpd is None:
-            sys.stderr.write(f"포트 {args.port}부터 {PORT_TRIES}개가 모두 사용 중입니다."
-                             f" --port 로 다른 포트를 지정하세요.\n")
+            sys.stderr.write(f"Ports {args.port}..{args.port + PORT_TRIES - 1} are all in use."
+                             f" Pass --port to choose another.\n")
             return 1
 
         url = "http://{}:{}".format(args.host, httpd.server_address[1])

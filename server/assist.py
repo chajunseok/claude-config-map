@@ -44,15 +44,15 @@ def work_dir():
 
 
 def build_prompt(text: str, instruction: str, path: str, range_=None) -> str:
-    lines = ["문서: %s" % path]
+    lines = ["Document: %s" % path]
     if isinstance(range_, dict):
         title = range_.get("title") or ""
         start, end = range_.get("start"), range_.get("end")
         if isinstance(start, int) and isinstance(end, int):
-            lines.append("섹션: %s (L%d–L%d)" % (title, start + 1, end))
+            lines.append("Section: %s (L%d–L%d)" % (title, start + 1, end))
         else:
-            lines.append("섹션: %s" % title)
-    lines += ["지시: %s" % instruction, "----- 본문 -----", text]
+            lines.append("Section: %s" % title)
+    lines += ["Instruction: %s" % instruction, "----- BODY -----", text]
     return "\n".join(lines)
 
 
@@ -73,7 +73,7 @@ def make_diff(orig: str, new: str) -> str:
         return ""
     return "\n".join(difflib.unified_diff(
         orig.splitlines(), new.splitlines(),
-        fromfile="현재", tofile="제안", lineterm=""))
+        fromfile="before", tofile="after", lineterm=""))
 
 
 def _prune():

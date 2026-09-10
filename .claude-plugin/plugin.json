@@ -1,7 +1,7 @@
 {
   "name": "config-map",
-  "version": "0.6.2",
-  "description": "Visualize every local Claude Code config (CLAUDE.md, settings, skills, hooks, plugins, MCP) in one browser view",
+  "version": "0.7.0",
+  "description": "Local browser dashboard for your Claude Code configuration. Scans ~/.claude (CLAUDE.md, rules, settings, skills, agents, commands, hooks, plugins, MCP) and every project listed in ~/.claude.json, shows the effective rule chain per project, and lets you edit files, toggle skills/plugins, and compare sections. Runs a Python 3.11 stdlib server bound to 127.0.0.1 only; no telemetry, no outbound network. Writes only files you explicitly save or toggle (with backups under ~/.claude/config-map/backups). The optional \"edit assistant\" runs your installed `claude -p` CLI with tools disabled and sends the open document text to Anthropic through your own account.",
   "author": {
     "name": "junseok.cha",
     "url": "https://github.com/chajunseok"

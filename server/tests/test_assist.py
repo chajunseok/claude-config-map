@@ -81,18 +81,18 @@ class TestPure(unittest.TestCase):
         d = assist.make_diff("- a\n- b\n", "1. a\n- b\n")
         self.assertIn("-- a", d)
         self.assertIn("+1. a", d)
-        self.assertTrue(d.startswith("--- 현재"))
+        self.assertTrue(d.startswith("--- before"))
 
     def test_build_prompt(self):
         p = assist.build_prompt("본문", "고쳐줘", "x/CLAUDE.md")
-        self.assertIn("문서: x/CLAUDE.md", p)
-        self.assertIn("지시: 고쳐줘", p)
-        self.assertIn("----- 본문 -----\n본문", p)
-        self.assertNotIn("섹션:", p)
+        self.assertIn("Document: x/CLAUDE.md", p)
+        self.assertIn("Instruction: 고쳐줘", p)
+        self.assertIn("----- BODY -----\n본문", p)
+        self.assertNotIn("Section:", p)
 
         p = assist.build_prompt("본문", "고쳐줘", "x/CLAUDE.md",
                                 {"title": "규칙", "start": 4, "end": 9})
-        self.assertIn("섹션: 규칙 (L5–L9)", p)
+        self.assertIn("Section: 규칙 (L5–L9)", p)
 
 
 class TestRun(AssistCase):

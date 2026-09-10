@@ -11,7 +11,7 @@ function actBtn(name, label, title){
 function renderActivity(){
   var bar = clear(document.getElementById("views"));
   VIEWS.forEach(function(v){
-    var b = actBtn(v[0], v[1], VIEW_TITLE[v[0]] + " — " + VIEW_HINT[v[0]]);
+    var b = actBtn(v[0], t(v[1]), t(VIEW_TITLE[v[0]]) + " — " + t(VIEW_HINT[v[0]]));
     b.setAttribute("role","tab");
     b.setAttribute("aria-selected", String(S.side === v[0]));
     b.setAttribute("aria-controls","sidebody");
@@ -22,11 +22,19 @@ function renderActivity(){
   // 하단 툴 — 상태바의 재스캔·종료와 같은 핸들러 (두 곳에서 찾을 수 있게)
   var tools = clear(document.getElementById("acttools"));
   tools.appendChild(el("div","divider"));
-  var re = actBtn("rescan", S.loading ? "스캔 중" : "재스캔", "설정을 다시 스캔");
+  // 언어 토글 — 라벨은 지금 언어의 반대쪽
+  var lg = actBtn("lang", LANG === "ko" ? "EN" : "한", t("언어 전환"));
+  lg.setAttribute("aria-label", t("언어 전환"));
+  lg.onclick = function(){
+    if(S.edit && !confirm(t("저장하지 않은 변경이 있습니다. 언어를 바꾸면 사라집니다. 계속할까요?"))) return;
+    setLang(LANG === "ko" ? "en" : "ko");
+  };
+  tools.appendChild(lg);
+  var re = actBtn("rescan", t(S.loading ? "스캔 중" : "재스캔"), t("설정을 다시 스캔"));
   re.disabled = S.loading;
   re.onclick = loadScan;
   tools.appendChild(re);
-  var sd = actBtn("quit", "종료", "서버 종료");
+  var sd = actBtn("quit", t("종료"), t("서버 종료"));
   sd.onclick = shutdown;
   tools.appendChild(sd);
   document.getElementById("sidebody").setAttribute("aria-labelledby","tab-"+S.side);
@@ -48,12 +56,12 @@ function sideMsg(parent, text, cls){ parent.appendChild(el("div","pad "+(cls || 
 // 표시명: 하위 폴더 CLAUDE.md 는 프로젝트 기준 상대경로
 function labelOf(f){
   var m = S.meta[f.path];
-  return (m && m.label) || f.name || f.path || "(이름 없음)";
+  return (m && m.label) || f.name || f.path || t("(이름 없음)");
 }
 function fileTitle(f, extra){
-  var t = (f.path || "") + " · " + (f.shared ? "팀 공유" : "개인");
-  if(extra) t += " · " + extra;
-  return t;
+  var s = (f.path || "") + " · " + t(f.shared ? "팀 공유" : "개인");
+  if(extra) s += " · " + extra;
+  return s;
 }
 function searchInput(ph, key, get, set){
   var inp = el("input");
@@ -82,61 +90,61 @@ function ctxOn(ctx, label){
 /* ---------- 툴바 (뷰가 바뀔 때만 다시 만든다 — 검색 포커스·IME 보존) ---------- */
 var SIDETOOL = null;
 function buildTool(slot){
-  var t = el("div","tbar");
+  var tb = el("div","tbar");
   if(S.side === "files"){
-    t.appendChild(searchInput("파일·프로젝트 검색","fileq",
+    tb.appendChild(searchInput(t("파일·프로젝트 검색"),"fileq",
       function(){ return S.fileq.q; },
       function(v){ S.fileq.q = v; renderSide(); }));
-    t.appendChild(chipBtn("팀 공유", S.fileq.shared, "chip:shared", function(b){
+    tb.appendChild(chipBtn(t("팀 공유"), S.fileq.shared, "chip:shared", function(b){
       S.fileq.shared = !S.fileq.shared;
       b.setAttribute("aria-pressed", String(S.fileq.shared));
       renderSide();
     }));
   }else if(S.side === "rules"){
-    var inp = searchInput("제목으로 프로젝트 간 비교","cmpq",
+    var inp = searchInput(t("제목으로 프로젝트 간 비교"),"cmpq",
       function(){ return S.cmpq; }, function(v){ S.cmpq = v; });
     inp.onkeydown = function(ev){
       if(ev.key !== "Enter") return;
       ev.preventDefault();
       openCompare(inp.value);
     };
-    t.appendChild(inp);
-    t.appendChild(chipBtn("⇄ 비교", false, "cmpgo", function(){ openCompare(S.cmpq); }));
+    tb.appendChild(inp);
+    tb.appendChild(chipBtn(t("⇄ 비교"), false, "cmpgo", function(){ openCompare(S.cmpq); }));
   }else if(S.side === "skills"){
-    t.appendChild(searchInput("이름·설명 검색","cardq",
+    tb.appendChild(searchInput(t("이름·설명 검색"),"cardq",
       function(){ return S.cardq.q; },
       function(v){ S.cardq.q = v; renderCardBody(); }));
     ["skill","agent","command"].forEach(function(k){
-      t.appendChild(chipBtn(KIND_KO[k], S.cardq.kinds[k], "chip:"+k, function(b){
+      tb.appendChild(chipBtn(t(KIND_KO[k]), S.cardq.kinds[k], "chip:"+k, function(b){
         S.cardq.kinds[k] = !S.cardq.kinds[k];
         b.setAttribute("aria-pressed", String(!!S.cardq.kinds[k]));
         renderCardBody();
       }));
     });
   }else if(S.side === "hooks"){
-    t.appendChild(searchInput("이벤트·매처·명령 검색","hookq",
+    tb.appendChild(searchInput(t("이벤트·매처·명령 검색"),"hookq",
       function(){ return S.hookq.q; },
       function(v){ S.hookq.q = v; renderSide(); }));
     [["global","전역"],["project","프로젝트"],["plugin","플러그인"]].forEach(function(p){
-      t.appendChild(chipBtn(p[1], S.hookq.src[p[0]], "hchip:"+p[0], function(b){
+      tb.appendChild(chipBtn(t(p[1]), S.hookq.src[p[0]], "hchip:"+p[0], function(b){
         S.hookq.src[p[0]] = !S.hookq.src[p[0]];
         b.setAttribute("aria-pressed", String(!!S.hookq.src[p[0]]));
         renderSide();
       }));
     });
   }else{
-    t.appendChild(searchInput("서버 이름 검색","mcpq",
+    tb.appendChild(searchInput(t("서버 이름 검색"),"mcpq",
       function(){ return S.mcpq.q; },
       function(v){ S.mcpq.q = v; renderSide(); }));
     ["command","url"].forEach(function(k){
-      t.appendChild(chipBtn(k, S.mcpq.tr[k], "mchip:"+k, function(b){
+      tb.appendChild(chipBtn(k, S.mcpq.tr[k], "mchip:"+k, function(b){
         S.mcpq.tr[k] = !S.mcpq.tr[k];
         b.setAttribute("aria-pressed", String(!!S.mcpq.tr[k]));
         renderSide();
       }));
     });
   }
-  slot.appendChild(t);
+  slot.appendChild(tb);
 }
 // 사이드바 다시 그리기 — 재렌더 시 포커스 행 유지 (data-key 로 같은 버튼을 다시 찾는다)
 function renderSide(){
@@ -144,7 +152,7 @@ function renderSide(){
   var k = (a && host.contains(a)) ? a.getAttribute("data-key") : null;
   // 같은 뷰 재렌더면 스크롤 위치 유지 — clear() 가 스크롤을 0으로 되돌리고 focus() 가 행을 끌어와 위치가 튀는 것 방지
   var top = (SIDETOOL === S.side) ? host.scrollTop : 0;
-  document.getElementById("side-title").textContent = VIEW_TITLE[S.side] || "";
+  document.getElementById("side-title").textContent = t(VIEW_TITLE[S.side] || "");
   sideCount("");
   if(SIDETOOL !== S.side){
     SIDETOOL = S.side;
@@ -197,8 +205,8 @@ function fileRow(parent, depth, f, src, opts){
   var lazy = f.scope === "subdir";
   uiRow(parent, {depth:depth, src:src, sel: S.filePath === f.path, dim: !!opts.dim,
     name: labelOf(f), key: f.path, title: fileTitle(f, opts.note),
-    warn: lazy ? "지연" : null,
-    tag: lazy ? null : (opts.tag || (f.shared ? "팀 공유" : "개인")),
+    warn: lazy ? t("지연") : null,
+    tag: lazy ? null : (opts.tag || t(f.shared ? "팀 공유" : "개인")),
     tagCls: (!lazy && !opts.tag && f.shared) ? "shared" : opts.tagCls,
     onclick: function(){ openFile(f.path); }});
 }
@@ -212,7 +220,7 @@ function listNode(parent, depth, id, title, arr, kind, proj, src, all){
   if(!treeFold(parent, depth, id, title, items.length, src, false)) return;
   items.forEach(function(f){
     var offed = ov && kind !== "agent" && ov[overrideKey(f, kind)] === "off";
-    fileRow(parent, depth+1, f, src, offed ? {dim:true, note:"skillOverrides OFF"} : null);
+    fileRow(parent, depth+1, f, src, offed ? {dim:true, note:t("skillOverrides OFF")} : null);
   });
 }
 function settingsNode(parent, depth, id, obj, src, all){
@@ -243,22 +251,22 @@ function renderTreeBody(root){
   if(!S.scan) return;
   var g = S.scan.global || {};
   var projects = S.scan.projects || [], plugins = S.scan.plugins || [];
-  sideCount(projects.length + " 프로젝트");
-  if(groupHd(root, {id:"g", title:"전역", count:hitCount(globalFiles(g), false), dflt:true,
+  sideCount(t("{n} 프로젝트", {n:projects.length}));
+  if(groupHd(root, {id:"g", title:t("전역"), count:hitCount(globalFiles(g), false), dflt:true,
                     force:fileFilterOn()})){
     if(g.claude_md && hitFile(g.claude_md, false)) fileRow(root, 0, g.claude_md, "global");
-    else if(!g.claude_md && !fileFilterOn()) emptyRow(root, 0, "CLAUDE.md 없음", "global");
+    else if(!g.claude_md && !fileFilterOn()) emptyRow(root, 0, t("CLAUDE.md 없음"), "global");
     listNode(root, 0, "g.rules", "rules", g.rules, null, null, "global", false);
     settingsNode(root, 0, "g.settings", g.settings, "global", false);
     listNode(root, 0, "g.skills", "skills", g.skills, "skill", null, "global", false);
     listNode(root, 0, "g.agents", "agents", g.agents, "agent", null, "global", false);
     listNode(root, 0, "g.commands", "commands", g.commands, "command", null, "global", false);
   }
-  if(groupHd(root, {id:"p", title:"프로젝트", count:projects.length, dflt:true,
+  if(groupHd(root, {id:"p", title:t("프로젝트"), count:projects.length, dflt:true,
                     force:fileFilterOn()})){
     projects.forEach(function(p){ projectNode(root, p); });
   }
-  if(groupHd(root, {id:"l", title:"플러그인", count:plugins.length, dflt:true,
+  if(groupHd(root, {id:"l", title:t("플러그인"), count:plugins.length, dflt:true,
                     force:fileFilterOn()})){
     plugins.forEach(function(pl){ pluginNode(root, pl); });
   }
@@ -273,24 +281,29 @@ function projectNode(parent, p){
   var keep = nameHit && !S.fileq.shared;   // 이름이 걸린 프로젝트는 파일이 없어도 남긴다
   if(fileFilterOn() && !cnt && !keep) return;
   var notes = [];
-  if(gone) notes.push("경로 없음");
-  if(p.coverage === "root-only") notes.push("루트만 · "+(COVER_KO[p.coverage_reason]||p.coverage_reason||"사유 미상"));
-  if(p.truncated || p.incomplete) notes.push("일부만 스캔");
+  if(gone) notes.push(t("경로 없음"));
+  if(p.coverage === "root-only")
+    notes.push(t("루트만 · {n}",
+                 {n: COVER_KO[p.coverage_reason] ? t(COVER_KO[p.coverage_reason])
+                                                 : (p.coverage_reason || t("사유 미상"))}));
+  if(p.truncated || p.incomplete) notes.push(t("일부만 스캔"));
   var warn = gone ? null
-    : (p.coverage === "root-only" ? "루트만" : ((p.truncated || p.incomplete) ? "일부만" : null));
+    : (p.coverage === "root-only" ? t("루트만")
+                                  : ((p.truncated || p.incomplete) ? t("일부만") : null));
   uiRow(parent, {depth:0, src:"project", sel:sel, dim:gone, bold:true,
     arrowBtn:{open:open, disabled:gone, key:"tg:"+id,
-              label:(p.name||p.path)+" 하위 항목 "+(open?"접기":"펼치기"),
+              label:t(open ? "{n} 하위 항목 접기" : "{n} 하위 항목 펼치기",
+                      {n:p.name||p.path}),
               onclick:function(){ setOpen(id, false); }},
     name: p.name || p.path, key:id, ariaCurrent:sel,
     title: p.path + (notes.length ? " · " + notes.join(" · ") : ""),
-    warn: warn, tag: gone ? "경로 없음" : null, count: (gone ? null : cnt),
+    warn: warn, tag: gone ? t("경로 없음") : null, count: (gone ? null : cnt),
     // 이름 클릭 = 선택 + 접혀 있고 하위 항목이 있으면 바로 펼침 (닫기는 화살표로만)
     onclick: function(){ if(!gone && !open && cnt > 0) S.expanded[id] = true; selectProject(p); }});
   if(gone || !open) return;
   (d.claude_md||[]).forEach(function(f){
     if(!hitFile(f, nameHit)) return;
-    fileRow(parent, 1, f, "project", f.scope === "subdir" ? {note:"지연 로드"} : null);
+    fileRow(parent, 1, f, "project", f.scope === "subdir" ? {note:t("지연 로드")} : null);
   });
   listNode(parent, 1, id+".rules", "rules", d.rules, null, null, "project", nameHit);
   settingsNode(parent, 1, id+".settings", d.settings, "project", nameHit);
@@ -308,11 +321,13 @@ function pluginNode(parent, pl){
   var open = fileFilterOn() ? true : isOpen(id, false);
   uiRow(parent, {depth:0, src:"plugin", dim: gone || offed, bold:true,
     arrowBtn:{open:open, disabled:gone, key:"tg:"+id,
-              label:label+" 하위 항목 "+(open?"접기":"펼치기"),
+              label:t(open ? "{n} 하위 항목 접기" : "{n} 하위 항목 펼치기",
+                      {n:label}),
               onclick:function(){ setOpen(id, false); }},
     name: label, key:id, expanded:open,
-    title: (pl.path || "") + (gone ? " · 경로 없음" : (offed ? " · 플러그인 OFF" : "")),
-    tag: gone ? "경로 없음" : (offed ? "OFF" : null), tagCls: offed ? "off" : null,
+    title: (pl.path || "") + (gone ? " · " + t("경로 없음")
+                                  : (offed ? " · " + t("플러그인 OFF") : "")),
+    tag: gone ? t("경로 없음") : (offed ? "OFF" : null), tagCls: offed ? "off" : null,
     count: (gone || offed) ? null : cnt,
     onclick: function(){ setOpen(id, false); }});
   if(gone || !open) return;
@@ -355,10 +370,10 @@ function openCompare(title){
   if(title) openFile(CMP + title);
 }
 function rulesCtx(ctx){
-  ctxOn(ctx, "프로젝트");
+  ctxOn(ctx, t("프로젝트"));
   var projs = ((S.scan && S.scan.projects) || []).filter(function(p){ return p.exists !== false; });
   var sel = el("select");
-  sel.setAttribute("aria-label","규칙을 볼 프로젝트");
+  sel.setAttribute("aria-label", t("규칙을 볼 프로젝트"));
   sel.setAttribute("data-key","rulesproj");
   projs.forEach(function(p){
     var op = el("option", null, p.name || p.path);
@@ -371,24 +386,25 @@ function rulesCtx(ctx){
     if(p) selectProject(p);
   };
   ctx.appendChild(sel);
-  ctx.appendChild(el("span","cr", VIEW_CTX.rules));
+  ctx.appendChild(el("span","cr", t(VIEW_CTX.rules)));
 }
 function renderRulesSide(root, ctx){
-  if(!S.project){ sideMsg(root, "파일 사이드바에서 프로젝트를 선택하세요."); return; }
-  if(S.project.exists === false){ sideMsg(root, "경로가 존재하지 않는 프로젝트입니다."); return; }
+  if(!S.project){ sideMsg(root, t("파일 사이드바에서 프로젝트를 선택하세요.")); return; }
+  if(S.project.exists === false){ sideMsg(root, t("경로가 존재하지 않는 프로젝트입니다.")); return; }
   rulesCtx(ctx);
   var pname = S.project.name || S.project.path;
   if(S.effErr){
-    sideMsg(root, "유효 규칙을 불러오지 못했습니다: "+S.effErr, "err");
+    sideMsg(root, t("유효 규칙을 불러오지 못했습니다: {e}", {e:tMsg(S.effErr)}), "err");
     root.appendChild(el("div","pad")).appendChild(retryBtn(loadEff));
     return;
   }
-  if(!S.eff){ sideMsg(root, "불러오는 중…"); return; }
-  if(!S.eff.length){ sideCount("0 파일"); sideMsg(root, "적용되는 규칙 파일이 없습니다."); return; }
-  sideCount(S.eff.length + " 파일");
+  if(!S.eff){ sideMsg(root, t("불러오는 중…")); return; }
+  if(!S.eff.length){ sideCount(t("{n} 파일", {n:0}));
+                     sideMsg(root, t("적용되는 규칙 파일이 없습니다.")); return; }
+  sideCount(t("{n} 파일", {n:S.eff.length}));
   var conf = conflictMap();
-  var groups = [{id:"rg", title:"전역", src:"global", items:[]},
-                {id:"rp", title:"프로젝트 · "+pname, src:"project", items:[]}];
+  var groups = [{id:"rg", title:t("전역"), src:"global", items:[]},
+                {id:"rp", title:t("프로젝트 · {n}", {n:pname}), src:"project", items:[]}];
   S.eff.forEach(function(it, i){
     groups[it.scope === "global" ? 0 : 1].items.push({it:it, i:i});
   });
@@ -399,20 +415,20 @@ function renderRulesSide(root, ctx){
       var it = e.it, m = S.meta[it.path] || {};
       uiRow(root, {depth:0, src:gr.src, sel: S.filePath === it.path, num:e.i+1, rnum:true,
         name: m.label || baseName(it.path), key: it.path,
-        title: it.path + " · " + (SCOPE_KO[it.scope] || it.scope)
-             + " · " + (it.shared ? "팀 공유" : "개인"),
-        warn: it.error ? "읽기 실패" : (it.lazy ? "지연" : null),
-        tag: (it.error || it.lazy) ? null : (it.shared ? "팀 공유" : "개인"),
+        title: it.path + " · " + t(SCOPE_KO[it.scope] || it.scope)
+             + " · " + t(it.shared ? "팀 공유" : "개인"),
+        warn: it.error ? t("읽기 실패") : (it.lazy ? t("지연") : null),
+        tag: (it.error || it.lazy) ? null : t(it.shared ? "팀 공유" : "개인"),
         tagCls: it.shared ? "shared" : null,
         onclick: function(){ openFile(it.path); }});
       (it.sections || []).forEach(function(sec){
         if(!sec || sec.level < 2) return;
         uiRow(root, {depth:1, src:gr.src, dim:true,
-          name: "## " + (sec.title || "(제목 없음)"),
+          name: "## " + (sec.title || t("(제목 없음)")),
           key: it.path + "#" + sec.start,
           title: it.path + " · L" + (sec.start + 1)
-               + (conf[sec.title] ? " · 전역과 프로젝트에 같은 제목 섹션" : ""),
-          warn: conf[sec.title] ? "충돌" : null,
+               + (conf[sec.title] ? " · " + t("전역과 프로젝트에 같은 제목 섹션") : ""),
+          warn: conf[sec.title] ? t("충돌") : null,
           onclick: function(){ openFile(it.path, {line:sec.start}); }});
       });
     });
@@ -423,21 +439,23 @@ function renderRulesSide(root, ctx){
 // 행 오른쪽 ON/OFF 스위치 (스킬·커맨드만)
 function skillSwitch(c){
   var cur = skillOverrides()[c.key] || "on", on = cur !== "off";
-  return switchEl({on:on, label: c.name + " — 이 프로젝트에서 사용", title:"이 프로젝트에서 사용",
+  return switchEl({on:on, label: t("{n} — 이 프로젝트에서 사용", {n:c.name}),
+    title: t("이 프로젝트에서 사용"),
     key:"sw:"+c.kind+":"+c.key, disabled: !toggleReady(),
     onToggle: function(sw){ doToggle("skillOverrides", c.key, on ? "off" : "on", [sw]); }});
 }
 // 플러그인 그룹 헤더의 ON/OFF — enabledPlugins 는 플러그인 단위
 function pluginSwitch(pl){
   var on = !pluginOff(pl);
-  return switchEl({on:on, label:(pl.name || pl.key) + " — 이 프로젝트에서 플러그인 사용",
-    title:"이 프로젝트에서 플러그인 사용", key:"plsw:"+pl.key, disabled: !toggleReady(),
+  return switchEl({on:on, label:t("{n} — 이 프로젝트에서 플러그인 사용",
+                                 {n:pl.name || pl.key}),
+    title:t("이 프로젝트에서 플러그인 사용"), key:"plsw:"+pl.key, disabled: !toggleReady(),
     onToggle: function(b){ doToggle("enabledPlugins", pl.key, on ? false : true, [b]); }});
 }
 function renderSkillsSide(root, ctx){
   if(!S.scan) return;
-  ctxOn(ctx, VIEW_CTX.skills);
-  ctx.appendChild(el("span","cv", toggleReady() ? S.toggleTarget : "프로젝트 미선택"));
+  ctxOn(ctx, t(VIEW_CTX.skills));
+  ctx.appendChild(el("span","cv", toggleReady() ? S.toggleTarget : t("프로젝트 미선택")));
   var body = el("div");
   body.id = "cardbody";
   root.appendChild(body);
@@ -449,7 +467,7 @@ function renderCardBody(){
   if(!body) return;
   clear(body);
   var all = collect(), shown = all.filter(cardMatch);
-  sideCount("표시 " + shown.length + " / 전체 " + all.length);
+  sideCount(t("표시 {n} / 전체 {a}", {n:shown.length, a:all.length}));
   var pMap = Object.create(null);
   ((S.scan && S.scan.plugins) || []).forEach(function(pl){ pMap[pl.name || pl.key] = pl; });
   var order = [], by = Object.create(null);
@@ -459,7 +477,7 @@ function renderCardBody(){
     by[s.key].items.push(c);
   });
   order.sort(function(a,b){ return a.src.rank - b.src.rank || a.src.label.localeCompare(b.src.label); });
-  if(!order.length){ sideMsg(body, "조건에 맞는 항목이 없습니다."); return; }
+  if(!order.length){ sideMsg(body, t("조건에 맞는 항목이 없습니다.")); return; }
   var searching = !!S.cardq.q.trim();
   order.forEach(function(sec){
     var id = "cards:" + sec.src.key, dflt = sec.src.rank < 2;
@@ -475,8 +493,8 @@ function renderCardBody(){
       var sw = (c.kind !== "agent" && !c.pluginOwned && toggleReady()) ? skillSwitch(c) : null;
       uiRow(body, {depth:0, src:srcCls, sel: S.filePath === c.path, dim: !!c.off,
         name: c.name, key: c.path,
-        title: c.path + (c.off ? " · " + (c.offLabel || "OFF") : ""),
-        tag: KIND_KO[c.kind] || c.kind, tagCls: "k-"+c.kind, sw: sw,
+        title: c.path + (c.off ? " · " + t(c.offLabel || "OFF") : ""),
+        tag: t(KIND_KO[c.kind] || c.kind), tagCls: "k-"+c.kind, sw: sw,
         onclick: function(){ openFile(c.path); }});
     });
   });
@@ -521,19 +539,19 @@ function hookMatch(h){
 function renderHooksSide(root, ctx){
   var hooks = ((S.scan && S.scan.hooks) || []).filter(hookMatch);
   sideCount(hooks.length + "");
-  ctxOn(ctx, VIEW_CTX.hooks);
-  if(!hooks.length){ sideMsg(root, "표시할 훅이 없습니다."); return; }
+  ctxOn(ctx, t(VIEW_CTX.hooks));
+  if(!hooks.length){ sideMsg(root, t("표시할 훅이 없습니다.")); return; }
   var g = groupHooks(hooks), sel = S.selHook ? hookKey(S.selHook) : null;
   g.order.forEach(function(ev){
-    if(!groupHd(root, {id:"hook:"+ev, title:ev, count:g.byEvent[ev].length, dflt:true})) return;
+    if(!groupHd(root, {id:"hook:"+ev, title:t(ev), count:g.byEvent[ev].length, dflt:true})) return;
     g.byEvent[ev].forEach(function(h){
       var src = hookSource(h.source), cmds = hookCmds(h);
       var first = cmds.length ? baseName(String(cmds[0]).split(/\s+/)[0]) : "";
       uiRow(root, {depth:0, src: src.cls || null, sel: sel === hookKey(h),
-        name: h.matcher || "(전체)", key: "hook:"+hookKey(h),
+        name: h.matcher || t("(전체)"), key: "hook:"+hookKey(h),
         sub: first + (cmds.length > 1 ? "…" : ""),
-        title: src.label + " → " + (cmds.join(" · ") || "(명령 없음)"),
-        warn: h.warn === "duplicate-star" ? "중복" : null,
+        title: src.label + " → " + (cmds.join(" · ") || t("(명령 없음)")),
+        warn: h.warn === "duplicate-star" ? t("중복") : null,
         count: cmds.length,
         onclick: function(){ selectHook(h); }});
     });
@@ -553,9 +571,9 @@ function mcpGroups(){
   }
   ((S.scan && S.scan.mcp) || []).forEach(function(m){
     var s = m.source || "(출처 없음)";
-    var label = s === "global" ? "전역"
-      : s.indexOf("project:") === 0 ? "프로젝트 · "+s.slice(8)
-      : s.indexOf("plugin:") === 0 ? "플러그인 · "+s.slice(7) : s;
+    var label = s === "global" ? t("전역")
+      : s.indexOf("project:") === 0 ? t("프로젝트 · {n}", {n:s.slice(8)})
+      : s.indexOf("plugin:") === 0 ? t("플러그인 · {n}", {n:s.slice(7)}) : t(s);
     var src = s === "global" ? "global"
       : s.indexOf("project:") === 0 ? "project"
       : s.indexOf("plugin:") === 0 ? "plugin" : null;
@@ -565,7 +583,7 @@ function mcpGroups(){
     if(pl.exists === false) return;
     var srv = pl.mcp_servers || {};
     keys(srv).forEach(function(n){
-      grp("plugin:"+pl.key, "플러그인 · "+(pl.name || pl.key), "plugin", null, pluginOff(pl))
+      grp("plugin:"+pl.key, t("플러그인 · {n}", {n:pl.name || pl.key}), "plugin", null, pluginOff(pl))
         .items.push({name:n, config:srv[n]});
     });
   });
@@ -576,7 +594,7 @@ function mcpGroups(){
     if(!mj || !mj.data || typeof mj.data !== "object") return;
     var srv = mj.data.mcpServers || {};
     keys(srv).forEach(function(n){
-      grp("pmcp:"+(mj.path || pr.path || ""), "프로젝트 .mcp.json · "+(pr.name || pr.path),
+      grp("pmcp:"+(mj.path || pr.path || ""), t("프로젝트 .mcp.json · {n}", {n:pr.name || pr.path}),
           "project", mj.path).items.push({name:n, config:srv[n]});
     });
   });
@@ -599,7 +617,7 @@ function mcpMatch(it){
   return String(it.name||"").toLowerCase().indexOf(q) >= 0;
 }
 function renderMcpSide(root, ctx){
-  ctxOn(ctx, (S.project && S.project.exists !== false) ? VIEW_CTX.mcpOne : VIEW_CTX.mcpAll);
+  ctxOn(ctx, t((S.project && S.project.exists !== false) ? VIEW_CTX.mcpOne : VIEW_CTX.mcpAll));
   var groups = mcpGroups().map(function(g){
     var q = {}; keys(g).forEach(function(k){ q[k] = g[k]; });
     q.items = g.items.filter(mcpMatch);
@@ -608,7 +626,7 @@ function renderMcpSide(root, ctx){
   var n = 0;
   groups.forEach(function(g){ n += g.items.length; });
   sideCount(n + "");
-  if(!groups.length){ sideMsg(root, "표시할 MCP 서버가 없습니다."); return; }
+  if(!groups.length){ sideMsg(root, t("표시할 MCP 서버가 없습니다.")); return; }
   groups.forEach(function(g){
     if(!groupHd(root, {id:"mcp:"+g.key, title:g.label, count:g.items.length, dflt:true})) return;
     g.items.forEach(function(it){
@@ -616,9 +634,10 @@ function renderMcpSide(root, ctx){
       var sel = {name:it.name, config:it.config, label:g.label, file:g.file};
       uiRow(root, {depth:0, src:g.src, dim:g.off,
         sel: !!(S.selMcp && S.selMcp.name === it.name && S.selMcp.label === g.label),
-        name: it.name || "(이름 없음)", key: "mcp:"+g.key+":"+it.name,
-        sub: cfg.command ? "command" : (cfg.url ? "url" : "설정 없음"),
-        title: g.label + " · " + (cfg.command || cfg.url || "-") + (g.off ? " · 플러그인 OFF" : ""),
+        name: it.name || t("(이름 없음)"), key: "mcp:"+g.key+":"+it.name,
+        sub: cfg.command ? "command" : (cfg.url ? "url" : t("설정 없음")),
+        title: g.label + " · " + (cfg.command || cfg.url || "-")
+             + (g.off ? " · " + t("플러그인 OFF") : ""),
         tag: g.off ? "OFF" : null, tagCls: g.off ? "off" : null,
         onclick: function(){ selectMcp(sel); }});
     });
