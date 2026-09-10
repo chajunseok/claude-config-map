@@ -251,7 +251,8 @@ function startEdit(sec){
     text = text.split("\n").slice(sec.start, sec.end).join("\n");
   }
   S.edit = {path:S.filePath, text:text, range:range, dirty:false,
-            issues:null, busy:false, conflict:false, msg:null, msgCls:""};
+            issues:null, busy:false, conflict:false, msg:null, msgCls:"",
+            assist:newAssist()};
   S.issues = null;
   renderRaw();
   if(ED && ED.ta) ED.ta.focus();
@@ -260,6 +261,8 @@ function startEdit(sec){
 function guardEdit(){
   if(!S.edit) return true;
   if(S.edit.dirty && !confirm("저장하지 않은 변경이 있습니다. 버릴까요?")) return false;
+  var a = S.edit.assist;
+  if(a && a.id) postJSON("/api/assist-cancel", {id:a.id}).catch(function(){});   // 응답은 무시
   S.edit = null; ED = null;
   return true;
 }
@@ -281,6 +284,9 @@ function renderEdit(p){
       "섹션 편집 중: " + (e.range.title || "(제목 없음)")
       + " (L" + (e.range.start+1) + "–L" + e.range.end + ")"));
   wrap.appendChild(bar);
+  if(!e.assist) e.assist = newAssist();
+  var as = buildAssist(e);
+  wrap.appendChild(as.node);
   if(m.shared) wrap.appendChild(el("div","sharewarn","git 추적 파일 — 커밋하면 팀 전체에 적용됨"));
   var msg = el("div","edmsg");
   wrap.appendChild(msg);
@@ -297,8 +303,9 @@ function renderEdit(p){
   var iss = el("div");
   wrap.appendChild(iss);
   p.appendChild(wrap);
-  ED = {path:e.path, ta:ta, msg:msg, issues:iss, btns:[bV,bS,bC]};
+  ED = {path:e.path, ta:ta, msg:msg, issues:iss, btns:[bV,bS,bC], st:st, assist:as.refs};
   refreshEdit();
+  refreshAssist();
 }
 // 검증/저장 응답만 반영 — textarea 는 다시 만들지 않는다 (커서·스크롤 유지)
 function refreshEdit(){
@@ -450,4 +457,184 @@ function relocate(e, file){
 function fullText(e){
   if(!e.range) return e.text;
   return spliceLines((S.file && S.file.text) || "", e.range.start, e.range.end, e.text);
+}
+
+/* ---------- 편집 도우미 (F9) — Claude CLI 에 수정 지시 → diff → 적용 ---------- */
+// ponytail: 작업 하나만 추적한다. 큐도 히스토리도 없음.
+function newAssist(){
+  return {prompt:"", model:"", id:null, status:null, elapsed:0,
+          result:null, diff:null, changed:false, error:null, cost:null};
+}
+// 프롬프트 칸 DOM — 본문 textarea 와 달리 부분 갱신(refreshAssist)만 한다
+function buildAssist(e){
+  var a = e.assist;
+  var box = el("div","assist");
+  var row = el("div","arow");
+  var pr = el("textarea","aprompt");
+  pr.rows = 1;
+  pr.value = a.prompt;
+  pr.spellcheck = false;
+  pr.placeholder = "Claude에게 수정 지시… (긴 문서는 섹션 편집 권장)";
+  pr.setAttribute("aria-label","Claude 수정 지시");
+  pr.oninput = function(){ if(S.edit && S.edit.assist) S.edit.assist.prompt = pr.value; };
+  pr.onkeydown = function(ev){
+    if(ev.key === "Enter" && !ev.shiftKey){ ev.preventDefault(); doAssist(); }
+  };
+  row.appendChild(pr);
+  var sel = el("select","amodel");
+  sel.setAttribute("aria-label","모델");
+  [["","기본 모델"],["sonnet","sonnet"],["opus","opus"],["haiku","haiku"]].forEach(function(o){
+    var op = el("option", null, o[1]);
+    op.value = o[0];
+    sel.appendChild(op);
+  });
+  sel.value = a.model || "";
+  sel.onchange = function(){ if(S.edit && S.edit.assist) S.edit.assist.model = sel.value; };
+  row.appendChild(sel);
+  var go = ebtn("요청", doAssist);
+  row.appendChild(go);
+  box.appendChild(row);
+  var msg = el("div","amsg");
+  msg.setAttribute("aria-live","polite");
+  box.appendChild(msg);
+  var dv = el("pre","diffview");
+  dv.hidden = true;
+  box.appendChild(dv);
+  var acts = el("div","aacts");
+  acts.hidden = true;
+  acts.appendChild(ebtn("적용", applyAssist));
+  acts.appendChild(ebtn("버리기", discardAssist));
+  box.appendChild(acts);
+  return {node:box, refs:{prompt:pr, model:sel, go:go, msg:msg, diff:dv, acts:acts}};
+}
+// diff 헤더(---/+++)를 벌 변경 줄 수
+function diffCount(diff){
+  var n = 0;
+  String(diff || "").split("\n").forEach(function(l){
+    if(/^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)) n++;
+  });
+  return n;
+}
+function refreshAssist(){
+  var e = S.edit;
+  if(!e || !e.assist || !ED || ED.path !== e.path || !ED.assist) return;
+  var a = e.assist, A = ED.assist, running = !!a.id;
+  A.prompt.disabled = running;
+  A.model.disabled = running;
+  A.go.disabled = running || !!e.busy;
+  var msg = clear(A.msg);
+  msg.className = "amsg" + (a.error ? " err" : "");
+  if(running){
+    msg.appendChild(el("span", null, "요청 중… " + a.elapsed + "초"));
+    var cb = el("button","linkbtn","취소");
+    cb.onclick = cancelAssist;
+    msg.appendChild(cb);
+  }else if(a.error){
+    msg.appendChild(el("span", null, a.error));
+  }else if(a.status === "done"){
+    msg.appendChild(el("span", null, a.changed
+      ? "제안 (" + diffCount(a.diff) + "줄 변경)" + (a.cost != null ? " · $" + a.cost.toFixed(4) : "")
+      : "변경 없음"));
+  }else if(a.status === "applied"){
+    msg.appendChild(el("span", null, "제안을 본문에 적용했습니다."));
+  }else if(a.status === "discarded"){
+    msg.appendChild(el("span", null, "제안을 버렸습니다."));
+  }
+  var show = a.status === "done" && a.changed && a.result != null;
+  var dv = clear(A.diff);
+  A.diff.hidden = !show;
+  A.acts.hidden = !show;
+  if(!show) return;
+  String(a.diff || "").split("\n").forEach(function(line){
+    var c = line.charAt(0);
+    dv.appendChild(el("span", c === "+" ? "add" : c === "-" ? "del" : c === "@" ? "hunk" : null,
+                      line + "\n"));
+  });
+}
+async function doAssist(){
+  var e = S.edit;
+  if(!e || !e.assist || e.busy) return;
+  var a = e.assist, path = e.path;
+  if(a.id) return;                                  // 이미 실행 중
+  var instruction = String(a.prompt || "").trim();
+  a.result = null; a.diff = null; a.changed = false; a.cost = null; a.elapsed = 0;
+  if(!instruction){
+    a.status = null; a.error = "수정 지시를 입력하세요.";
+    return refreshAssist();
+  }
+  a.error = null; a.status = "running"; a.id = "…";  // 요청 중 표시. 실제 id 는 202 응답
+  refreshAssist();
+  var res = null, err = null;
+  try{
+    res = await postJSON("/api/assist", {path:path, text:e.text, instruction:instruction,
+                                         range:e.range || undefined, model:a.model || undefined});
+  }catch(ex){ err = ex.message; }
+  if(!editAlive(path) || S.edit.assist !== a) return;
+  a.id = null;
+  if(err || !res.ok){
+    a.status = "error";
+    a.error = err ? "요청하지 못했습니다: " + err
+            : res.status === 503 ? "Claude Code CLI 를 찾지 못했습니다 — 설치·로그인 후 다시 시도"
+            : res.status === 429 ? "이미 실행 중인 요청이 많습니다" : resErr(res);
+    return refreshAssist();
+  }
+  a.id = res.body.id;
+  refreshAssist();
+  pollAssist(path, a.id);
+}
+// 1초 간격 폴링. 세대 가드: 편집이 끝났거나 다른 작업이면 조용히 멈춘다
+function pollAssist(path, id){
+  setTimeout(async function(){
+    if(!assistAlive(path, id)) return;
+    var b = null, err = null;
+    try{ b = await getJSON("/api/assist?id=" + encodeURIComponent(id)); }
+    catch(ex){ err = ex.message; }
+    if(!assistAlive(path, id)) return;
+    var a = S.edit.assist;
+    if(err){
+      a.id = null; a.status = "error"; a.error = "상태를 확인하지 못했습니다: " + err;
+      return refreshAssist();
+    }
+    a.elapsed = Math.round((b.elapsed_ms || 0) / 1000);
+    if(b.status === "running"){ refreshAssist(); return pollAssist(path, id); }
+    a.id = null;
+    a.status = b.status;
+    if(b.status === "done"){
+      a.result = b.result || ""; a.diff = b.diff || ""; a.changed = !!b.changed;
+      a.cost = typeof b.cost_usd === "number" ? b.cost_usd : null;
+      a.error = null;
+    }else{
+      a.error = b.status === "cancelled" ? "취소했습니다." : (b.error || "요청이 실패했습니다.");
+    }
+    refreshAssist();
+  }, 1000);
+}
+function assistAlive(path, id){
+  return editAlive(path) && !!S.edit.assist && S.edit.assist.id === id;
+}
+function cancelAssist(){
+  var a = S.edit && S.edit.assist;
+  if(!a || !a.id) return;
+  postJSON("/api/assist-cancel", {id:a.id}).catch(function(){});
+  a.id = null; a.status = "cancelled"; a.error = "취소했습니다.";
+  refreshAssist();
+}
+// 적용 = textarea·S.edit.text 만 바꿈다. 저장·검증 흐름은 그대로
+function applyAssist(){
+  var e = S.edit, a = e && e.assist;
+  if(!a || a.result == null || !ED || ED.path !== e.path) return;
+  ED.ta.value = a.result;
+  e.text = a.result;
+  e.dirty = true;
+  e.issues = null;                       // 본문이 바뀌었으므로 직전 검증 결과는 버린다
+  if(ED.st) ED.st.textContent = "수정됨";
+  a.result = null; a.diff = null; a.changed = false; a.status = "applied"; a.error = null;
+  refreshEdit();
+  refreshAssist();
+}
+function discardAssist(){
+  var a = S.edit && S.edit.assist;
+  if(!a) return;
+  a.result = null; a.diff = null; a.changed = false; a.status = "discarded"; a.error = null;
+  refreshAssist();
 }

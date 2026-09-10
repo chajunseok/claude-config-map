@@ -14,7 +14,9 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import assist  # noqa: E402
 import web_server  # noqa: E402
+from test_assist import FakeProc, ok_json  # noqa: E402
 
 
 def get(url):
@@ -859,6 +861,105 @@ class TestSectionEndpoints(ServerCase):
             "mtime": self.file_mtime(self.settings_file), "text": "{}\n"})
         self.assertEqual(code, 200)
         self.assertNotIn("sections", json.loads(body))
+
+class TestAssistEndpoints(ServerCase):
+    """POST /api/assist · GET /api/assist · POST /api/assist-cancel 상태 코드 매트릭스."""
+
+    def setUp(self):
+        super().setUp()
+        assist._JOBS.clear()
+        self.addCleanup(assist._JOBS.clear)
+        cli = mock.patch.object(assist, "cli_path", return_value="claude")
+        cli.start()
+        self.addCleanup(cli.stop)
+
+    def body(self, **over):
+        return {"path": "x/CLAUDE.md", "text": "- a\n- b\n",
+                "instruction": "번호 목록으로 바꿔줘", **over}
+
+    def test_start_then_poll_done(self):
+        with mock.patch.object(assist.subprocess, "Popen",
+                               return_value=FakeProc(ok_json("1. a\n1. b\n"))):
+            code, body, _ = self.post("/api/assist", self.body(model="sonnet"))
+            self.assertEqual(code, 202)
+            job_id = json.loads(body)["id"]
+            for _ in range(200):
+                code, body, _ = get(self.url + "/api/assist?id=" + job_id)
+                self.assertEqual(code, 200)
+                d = json.loads(body)
+                if d["status"] != "running":
+                    break
+                time.sleep(0.01)
+        self.assertEqual(d["status"], "done")
+        self.assertEqual(d["result"], "1. a\n1. b\n")
+        self.assertTrue(d["changed"])
+        self.assertIn("+1. a", d["diff"])
+        self.assertEqual(d["cost_usd"], 0.01)
+
+    def test_empty_instruction_is_400(self):
+        code, body, _ = self.post("/api/assist", self.body(instruction="   "))
+        self.assertEqual(code, 400)
+        self.assertEqual(json.loads(body)["error"], "instruction required")
+
+    def test_missing_text_is_400(self):
+        code, _, _ = self.post("/api/assist", {"path": "x", "instruction": "y"})
+        self.assertEqual(code, 400)
+
+    def test_bad_model_is_400(self):
+        code, body, _ = self.post("/api/assist", self.body(model="gpt"))
+        self.assertEqual(code, 400)
+        self.assertEqual(json.loads(body)["error"], "invalid model")
+
+    def test_bad_range_is_400(self):
+        code, _, _ = self.post("/api/assist", self.body(range={"title": "t", "start": "0"}))
+        self.assertEqual(code, 400)
+
+    def test_no_cli_is_503(self):
+        with mock.patch.object(assist, "cli_path", return_value=None):
+            code, body, _ = self.post("/api/assist", self.body())
+        self.assertEqual(code, 503)
+        self.assertEqual(json.loads(body)["error"], "claude CLI not found")
+
+    def test_busy_is_429(self):
+        with mock.patch.object(assist, "start", side_effect=RuntimeError("busy")):
+            code, body, _ = self.post("/api/assist", self.body())
+        self.assertEqual(code, 429)
+        self.assertEqual(json.loads(body)["error"], "busy")
+
+    def test_foreign_origin_is_403(self):
+        code, _, _ = self.post("/api/assist", self.body(),
+                               headers={"Origin": "http://evil.example"})
+        self.assertEqual(code, 403)
+
+    def test_unknown_id_is_404(self):
+        code, body, _ = get(self.url + "/api/assist?id=nope")
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "unknown job")
+        code, _, _ = get(self.url + "/api/assist")
+        self.assertEqual(code, 404)
+
+    def test_cancel_ok_and_unknown(self):
+        code, body, _ = self.post("/api/assist-cancel", {"id": "nope"})
+        self.assertEqual(code, 404)
+        self.assertEqual(json.loads(body)["error"], "unknown job")
+
+        gate = threading.Event()
+        proc = FakeProc(gate=gate)
+        with mock.patch.object(assist.subprocess, "Popen", return_value=proc):
+            code, body, _ = self.post("/api/assist", self.body())
+            self.assertEqual(code, 202)
+            job_id = json.loads(body)["id"]
+            code, body, _ = self.post("/api/assist-cancel", {"id": job_id})
+            self.assertEqual(code, 200)
+            self.assertTrue(json.loads(body)["ok"])
+            code, body, _ = get(self.url + "/api/assist?id=" + job_id)
+            self.assertEqual(json.loads(body)["status"], "cancelled")
+            gate.set()
+
+    def test_cancel_without_id_is_400(self):
+        code, _, _ = self.post("/api/assist-cancel", {})
+        self.assertEqual(code, 400)
+
 
 class TestVersionGuard(unittest.TestCase):
     """sys.version_info는 patch가 어려워 소스 배치만 검증한다 (가드가 import보다 먼저)."""

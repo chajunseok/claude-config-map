@@ -23,9 +23,10 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs, unquote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import assist  # noqa: E402
 import core  # noqa: E402
 
-VERSION = "0.5.2"
+VERSION = "0.6.0"
 MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
@@ -150,6 +151,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._sections((q.get("path") or [""])[0])
         if u.path == "/api/rules":
             return self._rules((q.get("project") or [""])[0])
+        if u.path == "/api/assist":
+            return self._assist_status((q.get("id") or [""])[0])
         if u.path == "/api/compare":
             return self._compare((q.get("title") or [""])[0])
         if u.path.startswith("/ui/"):
@@ -166,7 +169,9 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
         handlers = {"/api/validate": self._validate, "/api/save": self._save,
-                    "/api/save-range": self._save_range, "/api/toggle": self._toggle}
+                    "/api/save-range": self._save_range, "/api/toggle": self._toggle,
+                    "/api/assist": self._assist_start,
+                    "/api/assist-cancel": self._assist_cancel}
         if path in handlers:
             body = self._body()
             if body is None:
@@ -451,6 +456,50 @@ class Handler(BaseHTTPRequestHandler):
             _allowed.add(r["path"])
         self._json(200, {"path": r["path"], "created": r["created"], "backup": r["backup"],
                          "section": section, "key": key, "value": r["value"]})
+
+    # --- F9 편집 도우미 (파일을 읽지도 쓰지도 않는다) ---
+
+    def _assist_start(self, body: dict):
+        path, text = body.get("path"), body.get("text")
+        instruction, model, range_ = body.get("instruction"), body.get("model"), body.get("range")
+        if not isinstance(path, str) or not path or len(path) > 4096:
+            return self._err(400, "path required")
+        if not isinstance(text, str):
+            return self._err(400, "text required")
+        if not isinstance(instruction, str) or not instruction.strip():
+            return self._err(400, "instruction required")
+        if model is not None and model not in assist.MODELS:
+            return self._err(400, "invalid model")
+        if range_ is not None:
+            if (not isinstance(range_, dict)
+                    or isinstance(range_.get("start"), bool)
+                    or isinstance(range_.get("end"), bool)
+                    or not isinstance(range_.get("start"), int)
+                    or not isinstance(range_.get("end"), int)):
+                return self._err(400, "invalid range")
+        if not assist.cli_path():
+            return self._err(503, "claude CLI not found")
+        try:
+            job_id = assist.start(text, instruction, path, range_, model)
+        except RuntimeError as e:
+            if str(e) == "busy":
+                return self._err(429, "busy")
+            return self._err(503, "claude CLI not found")
+        self._json(202, {"id": job_id})
+
+    def _assist_status(self, raw: str):
+        job = assist.status(raw) if raw else None
+        if job is None:
+            return self._err(404, "unknown job")
+        self._json(200, job)
+
+    def _assist_cancel(self, body: dict):
+        job_id = body.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            return self._err(400, "id required")
+        if not assist.cancel(job_id):
+            return self._err(404, "unknown job")
+        self._json(200, {"ok": True})
 
     def _project(self, raw: str) -> dict | None:
         """스캔 결과의 프로젝트 항목. 실패면 응답까지 보내고 None."""
