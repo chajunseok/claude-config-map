@@ -19,16 +19,21 @@ if not log.handlers:
 EXCLUDE_DIRS = {"node_modules", ".git", "dist", "build", "target", ".venv",
                 "venv", "__pycache__", ".next", ".nuxt", "out", "coverage"}
 MD_NAMES = {"CLAUDE.md", "CLAUDE.local.md"}
+# git이 추적하더라도 개인 설정으로 간주하는 파일명 (PRD: *.local.* 은 공유가 아니다)
+LOCAL_NAMES = {"CLAUDE.local.md", "settings.local.json"}
 KIND_DIRS = ("skills", "agents", "commands")
 FM_KEYS = frozenset({"name", "description"})
+# YAML 블록 스칼라 표시 (`|`, `>` 와 chomping 변형). 이 값이면 본문이 다음 줄에 있다.
+BLOCK_SCALARS = frozenset({"|", "|-", "|+", ">", ">-", ">+"})
 
 # ponytail: 파싱·권한 실패를 한 곳에 모으는 모듈 전역. scan()이 시작할 때 비운다.
 # scan()이 잠금으로 직렬화되므로 전역 리스트로 충분. 동시 스캔이 필요해지면 인자 전달로 교체.
 _errors: list = []
 
-# ponytail: scan() 전체를 감싸는 단일 전역 락. 동시 스캔은 직렬화된다.
+# ponytail: 스캔 공개 함수 전체를 감싸는 단일 전역 락. 동시 스캔은 직렬화된다.
+# RLock인 이유: scan()이 잡은 채로 scan_global/scan_projects/... 를 다시 부른다.
 # 병렬 스캔 처리량이 필요해지면 _errors를 인자로 넘기고 락을 없앤다.
-_SCAN_LOCK = threading.Lock()
+_SCAN_LOCK = threading.RLock()
 
 _UNSET = object()
 
@@ -43,6 +48,15 @@ def _err(path, message: str) -> dict:
 
 def errors() -> list:
     return list(_errors)
+
+
+def _as_dict(value, path, label: str) -> dict | None:
+    """JSON 최상위 타입 가드. dict면 그대로, None이면 조용히 None,
+    그 외 타입이면 에러로 남기고 None (스캔은 계속한다)."""
+    if value is None or isinstance(value, dict):
+        return value
+    _err(path, f"{label}: expected object, got {type(value).__name__}")
+    return None
 
 
 def _expand(path) -> Path:
@@ -119,7 +133,10 @@ def parse_frontmatter(text: str) -> dict:
         k = key.strip()
         if not sep or k not in FM_KEYS:
             continue
-        out[k] = val.strip().strip("'\"")
+        v = val.strip()
+        if v in BLOCK_SCALARS:  # 멀티라인 값은 한 줄 파서 계약 밖 — 키 자체를 건너뛴다
+            continue
+        out[k] = v.strip("'\"")
     return {}  # 닫는 `---`가 없으면 frontmatter가 아니다
 
 
@@ -209,7 +226,9 @@ def _scan_kind_dirs(base: Path, shared_set=None) -> dict:
         items = []
         if d.is_dir():
             for f in sorted(d.rglob("*.md")):
-                if not f.is_file() or any(part in EXCLUDE_DIRS for part in f.parts):
+                # 제외 판정은 base 기준 상대 경로로만 (절대 경로에 build/ 같은 조상이 있어도 무관)
+                if not f.is_file() or any(part in EXCLUDE_DIRS
+                                          for part in f.relative_to(d).parts):
                     continue
                 e = _file_entry(f, _shared(f, shared_set), frontmatter=True)
                 if e is not None:
@@ -219,10 +238,18 @@ def _scan_kind_dirs(base: Path, shared_set=None) -> dict:
 
 
 def _shared(path, shared_set) -> bool:
+    # *.local.* 은 git 추적 여부와 무관하게 개인 설정
+    if Path(path).name in LOCAL_NAMES:
+        return False
     return bool(shared_set) and _p(path) in shared_set
 
 
 def scan_global() -> dict:
+    with _SCAN_LOCK:  # _err() 접근 직렬화. scan() 안에서는 RLock 재진입으로 통과
+        return _scan_global()
+
+
+def _scan_global() -> dict:
     h = home()
     c = h / ".claude"
     g = {"root": _p(c), "claude_md": None, "rules": [], "settings": {}}
@@ -247,6 +274,12 @@ def scan_global() -> dict:
 
 def scan_project(path, coverage: str = "full", coverage_reason: str | None = None,
                  tracked=_UNSET) -> dict:
+    with _SCAN_LOCK:
+        return _scan_project(path, coverage, coverage_reason, tracked)
+
+
+def _scan_project(path, coverage: str = "full", coverage_reason: str | None = None,
+                  tracked=_UNSET) -> dict:
     p = _expand(path)
     if not p.is_dir():
         return {"path": _p(p), "exists": False}
@@ -327,11 +360,10 @@ def _git_tracked(root: Path) -> set | None:
         return None
     if r.returncode != 0:
         return None
-    out = r.stdout
-    if isinstance(out, bytes):  # text=True를 무시하는 mock 대비
-        out = out.decode("utf-8", "replace")
+    # 파일마다 resolve하면 수천 번의 stat이 된다. root만 한 번 풀고 문자열로 붙인다.
+    base = _p(root).rstrip("/")
     # -z: core.quotepath 인용을 피하려면 NUL 구분이 필수 (비ASCII 경로)
-    return {_p(root / n) for n in out.split("\0") if n.strip()}
+    return {f"{base}/{n}" for n in r.stdout.split("\0") if n.strip()}
 
 
 def _coverage_of(key: str, all_keys: set, home_key: str):
@@ -348,12 +380,18 @@ def _coverage_of(key: str, all_keys: set, home_key: str):
 
 
 def scan_projects(cfg=None) -> list:
+    with _SCAN_LOCK:  # _as_dict/_err를 부르므로 여기도 잠금 안이어야 한다
+        return _scan_projects(cfg)
+
+
+def _scan_projects(cfg=None) -> list:
     if cfg is None:
         cfg = _read_json(home() / ".claude.json")
     if not cfg or "data" not in cfg:
         return []
-    projects = cfg["data"].get("projects")
-    if not isinstance(projects, dict):
+    root = _as_dict(cfg["data"], cfg.get("path"), "root")
+    projects = _as_dict(root.get("projects"), cfg.get("path"), "projects") if root else None
+    if not projects:
         return []
     keys = {raw: _p(raw) for raw in projects}
     all_keys = set(keys.values())
@@ -372,19 +410,30 @@ def scan_projects(cfg=None) -> list:
             for root, res in zip(roots, ex.map(_git_tracked, roots)):
                 tracked[root] = res
 
-    return [scan_project(root, cov, reason, tracked.get(root))
-            for root, cov, reason in plan]
+    return [scan_project(r, cov, reason, tracked.get(r))
+            for r, cov, reason in plan]
 
 
 def scan_plugins() -> list:
+    with _SCAN_LOCK:
+        return _scan_plugins()
+
+
+def _scan_plugins() -> list:
     h = home()
     installed = _read_json(h / ".claude" / "plugins" / "installed_plugins.json")
     if not installed or "data" not in installed:
         return []
+    path = installed.get("path")
+    data = _as_dict(installed["data"], path, "root")
+    plugins = _as_dict(data.get("plugins"), path, "plugins") if data else None
     out = []
-    for key, entries in (installed["data"].get("plugins") or {}).items():
+    for key, entries in (plugins or {}).items():
         for entry in entries if isinstance(entries, list) else [entries]:
-            out.append(_scan_plugin(key, entry))
+            e = _as_dict(entry, path, f"plugins.{key}")
+            if e is None:
+                continue
+            out.append(_scan_plugin(key, e))
     return out
 
 
@@ -402,10 +451,11 @@ def _scan_plugin(key: str, entry: dict) -> dict:
 
     manifest = _read_json(root / ".claude-plugin" / "plugin.json")
     p["manifest"] = manifest
-    data = (manifest or {}).get("data") or {}
+    mpath = (manifest or {}).get("path")
+    data = _as_dict((manifest or {}).get("data"), mpath, "plugin.json") or {}
     p["name"] = data.get("name") or key.split("@")[0]
     p["description"] = data.get("description")
-    p["mcp_servers"] = data.get("mcpServers") or {}
+    p["mcp_servers"] = _as_dict(data.get("mcpServers"), mpath, "mcpServers") or {}
 
     skills = root / "skills"
     if skills.is_dir():
@@ -435,24 +485,39 @@ def _scan_plugin(key: str, entry: dict) -> dict:
 
 
 def scan_mcp(cfg=None) -> list:
+    with _SCAN_LOCK:
+        return _scan_mcp(cfg)
+
+
+def _scan_mcp(cfg=None) -> list:
     if cfg is None:
         cfg = _read_json(home() / ".claude.json")
     if not cfg or "data" not in cfg:
         return []
-    d = cfg["data"]
+    cpath = cfg.get("path")
+    d = _as_dict(cfg["data"], cpath, "root")
+    if d is None:
+        return []
     out = []
-    for name, cfgv in (d.get("mcpServers") or {}).items():
+    for name, cfgv in (_as_dict(d.get("mcpServers"), cpath, "mcpServers") or {}).items():
         out.append({"name": name, "source": "global", "config": cfgv})
-    for path, pd in (d.get("projects") or {}).items():
-        if not isinstance(pd, dict):
+    for path, pd in (_as_dict(d.get("projects"), cpath, "projects") or {}).items():
+        pd = _as_dict(pd, cpath, f"projects.{path}")
+        if pd is None:
             continue
-        for name, cfgv in (pd.get("mcpServers") or {}).items():
+        for name, cfgv in (_as_dict(pd.get("mcpServers"), cpath,
+                                    f"projects.{path}.mcpServers") or {}).items():
             out.append({"name": name, "source": f"project:{_p(path)}", "config": cfgv})
     return out
 
 
 def effective_rules(project: dict) -> list:
     """F2 순서로 적용되는 규칙 파일 목록. project는 scan_project 결과."""
+    with _SCAN_LOCK:
+        return _effective_rules(project)
+
+
+def _effective_rules(project: dict) -> list:
     g = scan_global()
     out = []
 

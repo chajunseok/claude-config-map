@@ -92,6 +92,17 @@ class TestFrontmatter(unittest.TestCase):
         self.assertLessEqual(set(fm), {"name", "description"})
         self.assertEqual(fm, {"name": "a", "description": "b"})
 
+    def test_block_scalar_key_is_skipped(self):
+        """멀티라인 값(`|`, `>`)은 키 자체를 넣지 않는다 (G1)."""
+        fm = core.parse_frontmatter(
+            "---\nname: a\ndescription: |\n  line one\n  line two\n---\nbody")
+        self.assertEqual(fm, {"name": "a"})
+        self.assertNotIn("description", fm)
+        for marker in ("|-", "|+", ">", ">-", ">+"):
+            fm = core.parse_frontmatter(
+                f"---\nname: a\ndescription: {marker}\n  body\n---\n")
+            self.assertEqual(fm, {"name": "a"}, marker)
+
     def test_broken(self):
         # 닫는 --- 없음
         self.assertEqual(core.parse_frontmatter("---\nname: a\nbody without close"), {})
@@ -244,12 +255,20 @@ class TestScan(FakeHome):
         self.assertTrue(shared[core._p(self.proj / "sub" / "CLAUDE.md")])
         self.assertFalse(shared[core._p(self.proj / "CLAUDE.local.md")])
 
-    def test_git_ls_files_bytes_stdout(self):
-        r = mock.Mock(returncode=0, stdout=b"CLAUDE.md\0sub/CLAUDE.md\0")
+    def test_local_files_never_shared(self):
+        """git이 추적해도 *.local.* 은 개인 설정 (G2)."""
+        w(self.proj / ".claude" / "settings.json", "{}")
+        w(self.proj / ".claude" / "settings.local.json", "{}")
+        r = mock.Mock(returncode=0, stdout=(
+            "CLAUDE.md\0CLAUDE.local.md\0"
+            ".claude/settings.json\0.claude/settings.local.json\0"))
         with mock.patch("core.subprocess.run", return_value=r):
             proj = core.scan_project(self.proj)
         shared = {e["path"]: e["shared"] for e in proj["claude_md"]}
         self.assertTrue(shared[core._p(self.proj / "CLAUDE.md")])
+        self.assertFalse(shared[core._p(self.proj / "CLAUDE.local.md")])
+        self.assertTrue(proj["settings"]["settings.json"]["shared"])
+        self.assertFalse(proj["settings"]["settings.local.json"]["shared"])
 
     def test_git_timeout_means_not_shared(self):
         with mock.patch("core.subprocess.run",
@@ -427,6 +446,117 @@ class TestScanLock(FakeHome):
         self.assertEqual(errs, [])
         self.assertEqual(len(out), 2)
         self.assertTrue(all(isinstance(d, dict) and "projects" in d for d in out))
+
+
+class TestExcludeUsesRelativePath(unittest.TestCase):
+    """홈 자체가 build/ 같은 제외 이름 아래에 있어도 스캔은 정상 (G3)."""
+
+    def test_home_under_excluded_dir_name(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name) / "build" / "home"
+        w(home / ".claude.json", "{}")
+        w(home / ".claude" / "skills" / "x" / "SKILL.md", "---\nname: x\n---\n")
+        w(home / ".claude" / "skills" / "node_modules" / "SKILL.md", "---\nname: no\n---\n")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_MAP_HOME": str(home)}):
+            g = core.scan_global()
+        names = {e["path"] for e in g["skills"]}
+        self.assertIn(core._p(home / ".claude" / "skills" / "x" / "SKILL.md"), names)
+        self.assertNotIn(
+            core._p(home / ".claude" / "skills" / "node_modules" / "SKILL.md"), names)
+
+
+class TestPluginScan(FakeHome):
+    def setUp(self):
+        super().setUp()
+        self.plugin = Path(self.tmp.name) / "plug"
+        w(self.plugin / ".claude-plugin" / "plugin.json", json.dumps({
+            "name": "myplug",
+            "description": "does things",
+            "hooks": "hooks/hooks.json",
+            "mcpServers": {"m1": {"command": "node"}},
+        }))
+        w(self.plugin / "hooks" / "hooks.json", json.dumps({
+            "hooks": {"PreToolUse": [
+                {"matcher": "Bash", "hooks": [{"type": "command", "command": "h"}]}]}
+        }))
+        w(self.plugin / "skills" / "a" / "SKILL.md",
+          "---\nname: skill-a\ndescription: sd\n---\nbody\n")
+        w(self.plugin / "commands" / "b.md", "---\nname: cmd-b\n---\nbody\n")
+        w(self.plugin / "commands" / "c.toml", 'prompt = "x"\n')
+        w(self.home / ".claude" / "plugins" / "installed_plugins.json", json.dumps({
+            "plugins": {"myplug@repo": [
+                {"installPath": self.plugin.as_posix(), "version": "1.2.3",
+                 "scope": "user"}]}
+        }))
+
+    def test_scan_plugins_full(self):
+        plugins = core.scan_plugins()
+        self.assertEqual(len(plugins), 1)
+        p = plugins[0]
+        self.assertTrue(p["exists"])
+        self.assertEqual(p["name"], "myplug")
+        self.assertEqual(p["version"], "1.2.3")
+        self.assertEqual(p["scope"], "user")
+        self.assertEqual(p["description"], "does things")
+
+        self.assertEqual(len(p["skills"]), 1)
+        self.assertEqual(p["skills"][0]["name"], "SKILL.md")
+        self.assertEqual(p["skills"][0]["name_meta"], "skill-a")
+        self.assertEqual(p["skills"][0]["description"], "sd")
+
+        self.assertEqual({c["name"] for c in p["commands"]}, {"b.md", "c.toml"})
+        by_name = {c["name"]: c for c in p["commands"]}
+        self.assertEqual(by_name["b.md"]["name_meta"], "cmd-b")
+        self.assertNotIn("name_meta", by_name["c.toml"])
+
+        self.assertEqual(set(p["hooks"]["hooks"]), {"PreToolUse"})
+        self.assertEqual(set(p["mcp_servers"]), {"m1"})
+        self.assertEqual(core.errors(), [])
+
+    def test_plugin_hooks_reach_scan(self):
+        d = core.scan()
+        events = {f["event"] for f in d["hooks"] if f["source"] == "plugin:myplug"}
+        self.assertEqual(events, {"PreToolUse"})
+
+
+class TestJsonTypeGuards(FakeHome):
+    def test_projects_as_list_is_recorded(self):
+        self.write_registry({"projects": ["a", "b"], "mcpServers": {"gm": {}}})
+        d = core.scan()
+        self.assertEqual(d["projects"], [])
+        self.assertEqual([m["name"] for m in d["mcp"]], ["gm"])
+        self.assertTrue(any("expected object, got list" in e["error"]
+                            for e in d["errors"]))
+
+    def test_registry_root_as_list(self):
+        self.write_registry("[1, 2]")
+        d = core.scan()
+        self.assertEqual(d["projects"], [])
+        self.assertEqual(d["mcp"], [])
+        self.assertTrue(any("expected object, got list" in e["error"]
+                            for e in d["errors"]))
+
+    def test_plugin_entry_not_object(self):
+        w(self.home / ".claude" / "plugins" / "installed_plugins.json",
+          json.dumps({"plugins": {"x@y": "nope"}}))
+        self.assertEqual(core.scan_plugins(), [])
+        self.assertTrue(any("expected object, got str" in e["error"]
+                            for e in core.errors()))
+
+
+class TestPublicFunctionsLocked(FakeHome):
+    def test_scan_project_standalone(self):
+        a = core.scan_project(self.proj)
+        b = core.scan()["projects"]
+        b = [p for p in b if p["path"] == core._p(self.proj)][0]
+        self.assertEqual(a["claude_md"], b["claude_md"])
+
+    def test_public_helpers_do_not_deadlock(self):
+        self.assertTrue(core.scan_global()["claude_md"])
+        self.assertEqual(core.scan_plugins(), [])
+        self.assertTrue(core.scan_mcp())
+        self.assertTrue(core.effective_rules(core.scan_project(self.proj)))
 
 
 class TestHookFlows(unittest.TestCase):
