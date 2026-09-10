@@ -1,0 +1,13 @@
+{
+  "name": "config-map",
+  "version": "0.1.0",
+  "description": "Visualize, validate and safely edit every local Claude Code config in one browser view",
+  "author": {
+    "name": "junseok.cha",
+    "url": "https://github.com/chajunseok"
+  },
+  "repository": "https://github.com/chajunseok/claude-config-map",
+  "commands": [
+    "./commands/"
+  ]
+}
