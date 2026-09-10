@@ -20,6 +20,7 @@ EXCLUDE_DIRS = {"node_modules", ".git", "dist", "build", "target", ".venv",
                 "venv", "__pycache__", ".next", ".nuxt", "out", "coverage"}
 MD_NAMES = {"CLAUDE.md", "CLAUDE.local.md"}
 KIND_DIRS = ("skills", "agents", "commands")
+FM_KEYS = frozenset({"name", "description"})
 
 # ponytail: 파싱·권한 실패를 한 곳에 모으는 모듈 전역. scan()이 시작할 때 비운다.
 # scan()이 잠금으로 직렬화되므로 전역 리스트로 충분. 동시 스캔이 필요해지면 인자 전달로 교체.
@@ -99,9 +100,9 @@ def read_text(path) -> dict | None:
 
 
 def parse_frontmatter(text: str) -> dict:
-    """맨 앞 `---` 블록의 한 줄짜리 `key: value`만 뽑는다.
+    """맨 앞 `---` 블록의 한 줄짜리 `key: value` 중 name/description만 뽑는다.
 
-    # ponytail: YAML 파서 없음. 중첩·리스트·멀티라인 값은 무시한다.
+    # ponytail: YAML 파서 없음. 중첩·리스트·멀티라인 값과 그 외 키는 무시한다.
     """
     if not text:
         return {}
@@ -115,9 +116,10 @@ def parse_frontmatter(text: str) -> dict:
         if line[:1] in (" ", "\t", "#", "-", ""):
             continue
         key, sep, val = line.partition(":")
-        if not sep or not key.strip():
+        k = key.strip()
+        if not sep or k not in FM_KEYS:
             continue
-        out[key.strip()] = val.strip().strip("'\"")
+        out[k] = val.strip().strip("'\"")
     return {}  # 닫는 `---`가 없으면 frontmatter가 아니다
 
 
@@ -127,22 +129,32 @@ DIR_BUDGET = 20000
 
 
 def iter_md(root, names=MD_NAMES, exclude=EXCLUDE_DIRS, max_depth: int = 8,
-            budget: int = DIR_BUDGET) -> list:
+            budget: int | None = None) -> list:
     """root 아래에서 이름이 names인 파일 경로 목록. 제외 디렉터리는 진입 자체를 막는다."""
     return _walk_md(root, names, exclude, max_depth, budget)[0]
 
 
 def _walk_md(root, names=MD_NAMES, exclude=EXCLUDE_DIRS, max_depth: int = 8,
-             budget: int = DIR_BUDGET):
-    """iter_md와 같되 (파일 목록, 상한 초과 여부)를 돌려준다."""
+             budget: int | None = None):
+    """iter_md와 같되 (파일 목록, 상한 초과 여부, 접근 실패 여부)를 돌려준다."""
+    if budget is None:
+        budget = DIR_BUDGET
     root = _expand(root)
     if not root.is_dir():
-        return [], False
+        return [], False, False
     root_str = str(root.resolve())
     found = []
     seen = 0
     truncated = False
-    for dirpath, dirs, files in os.walk(root_str):
+    incomplete = False
+
+    def on_error(e):
+        # os.walk의 onerror는 메인 스레드에서 동기 호출되므로 _err()를 그대로 쓴다
+        nonlocal incomplete
+        incomplete = True
+        _err(getattr(e, "filename", None) or root_str, f"walk failed: {e}")
+
+    for dirpath, dirs, files in os.walk(root_str, onerror=on_error):
         seen += 1
         if seen > budget:
             truncated = True
@@ -156,12 +168,15 @@ def _walk_md(root, names=MD_NAMES, exclude=EXCLUDE_DIRS, max_depth: int = 8,
                 found.append(Path(dirpath) / f)
     if truncated:
         log.info("scan truncated at %d dirs: %s", budget, root_str)
-    return found, truncated
+    return found, truncated, incomplete
 
 
-def _file_entry(path, shared: bool = False, frontmatter: bool = False) -> dict:
+def _file_entry(path, shared: bool = False, frontmatter: bool = False) -> dict | None:
     p = Path(path)
-    st = p.stat()
+    try:
+        st = p.stat()
+    except FileNotFoundError:  # 스캔 도중 사라진 파일은 결과에서 뺀다
+        return None
     e = {"path": _p(p), "name": p.name, "size": st.st_size,
          "mtime": st.st_mtime, "shared": shared}
     if frontmatter:
@@ -194,9 +209,11 @@ def _scan_kind_dirs(base: Path, shared_set=None) -> dict:
         items = []
         if d.is_dir():
             for f in sorted(d.rglob("*.md")):
-                if any(part in EXCLUDE_DIRS for part in f.parts):
+                if not f.is_file() or any(part in EXCLUDE_DIRS for part in f.parts):
                     continue
-                items.append(_file_entry(f, _shared(f, shared_set), frontmatter=True))
+                e = _file_entry(f, _shared(f, shared_set), frontmatter=True)
+                if e is not None:
+                    items.append(e)
         out[kind] = items
     return out
 
@@ -216,7 +233,8 @@ def scan_global() -> dict:
 
     rules = c / "rules"
     if rules.is_dir():
-        g["rules"] = [_file_entry(f) for f in sorted(rules.rglob("*.md"))]
+        g["rules"] = [e for f in sorted(rules.rglob("*.md")) if f.is_file()
+                      if (e := _file_entry(f)) is not None]
 
     for name in ("settings.json", "settings.local.json"):
         r = _read_json(c / name)
@@ -235,7 +253,7 @@ def scan_project(path, coverage: str = "full", coverage_reason: str | None = Non
 
     shared_set = _git_tracked(p) if tracked is _UNSET else tracked
     proj = {"path": _p(p), "exists": True, "name": p.name, "coverage": coverage,
-            "git": shared_set is not None, "rules": [], "settings": {}, "imports": []}
+            "git": shared_set is not None, "rules": [], "settings": {}}
     if coverage_reason:
         proj["coverage_reason"] = coverage_reason
 
@@ -243,10 +261,11 @@ def scan_project(path, coverage: str = "full", coverage_reason: str | None = Non
         # 다른 프로젝트의 조상·드라이브 루트·홈은 재귀하지 않는다 (C7)
         md_paths = [p / n for n in sorted(MD_NAMES) if (p / n).is_file()]
         proj["truncated"] = False
+        proj["incomplete"] = False
     else:
-        md_paths, proj["truncated"] = _walk_md(p)
+        md_paths, proj["truncated"], proj["incomplete"] = _walk_md(p)
 
-    files = [_file_entry(f, _shared(f, shared_set)) for f in md_paths]
+    files = [e for f in md_paths if (e := _file_entry(f, _shared(f, shared_set))) is not None]
     root_posix = _p(p)
     for e in files:
         rel = e["path"][len(root_posix):].lstrip("/")
@@ -255,8 +274,8 @@ def scan_project(path, coverage: str = "full", coverage_reason: str | None = Non
 
     rules = p / ".claude" / "rules"
     if rules.is_dir():
-        proj["rules"] = [_file_entry(f, _shared(f, shared_set))
-                         for f in sorted(rules.rglob("*.md"))]
+        proj["rules"] = [e for f in sorted(rules.rglob("*.md")) if f.is_file()
+                         if (e := _file_entry(f, _shared(f, shared_set))) is not None]
 
     for name in ("settings.json", "settings.local.json"):
         r = _read_json(p / ".claude" / name)
@@ -270,13 +289,14 @@ def scan_project(path, coverage: str = "full", coverage_reason: str | None = Non
     proj["mcp_json"] = mcp
 
     for e in proj["claude_md"]:
-        if e["scope"] == "root":
-            proj["imports"] += _imports(e["path"], p)
+        e["imports"] = _imports(e["path"])
     return proj
 
 
-def _imports(md_path, project_root: Path) -> list:
+def _imports(md_path) -> list:
     """CLAUDE.md 본문의 `@경로` import 1단계. 실존 여부만 기록.
+
+    상대 경로는 그 CLAUDE.md의 부모 디렉터리 기준으로 해석한다.
 
     # ponytail: 줄 시작 `@` 토큰만 본다. 중첩 import는 따라가지 않는다 (PRD S5).
     """
@@ -291,7 +311,7 @@ def _imports(md_path, project_root: Path) -> list:
         token = s[1:].split()[0]
         target = _expand(token)
         if not target.is_absolute():
-            target = project_root / token
+            target = _expand(md_path).parent / token
         out.append({"from": _p(md_path), "raw": token,
                     "path": _p(target), "exists": target.exists()})
     return out
@@ -392,12 +412,14 @@ def _scan_plugin(key: str, entry: dict) -> dict:
         for sk in sorted(skills.iterdir()):
             f = sk / "SKILL.md"
             if f.is_file():
-                p["skills"].append(_file_entry(f, frontmatter=True))
+                e = _file_entry(f, frontmatter=True)
+                if e is not None:
+                    p["skills"].append(e)
 
     commands = root / "commands"
     if commands.is_dir():
-        p["commands"] = [_file_entry(f, frontmatter=(f.suffix == ".md"))
-                         for f in sorted(commands.rglob("*")) if f.is_file()]
+        p["commands"] = [e for f in sorted(commands.rglob("*")) if f.is_file()
+                         if (e := _file_entry(f, frontmatter=(f.suffix == ".md"))) is not None]
 
     hooks_ref = data.get("hooks")
     if isinstance(hooks_ref, str):

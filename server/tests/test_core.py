@@ -86,6 +86,12 @@ class TestFrontmatter(unittest.TestCase):
         self.assertEqual(core.parse_frontmatter("# just markdown\n"), {})
         self.assertEqual(core.parse_frontmatter(""), {})
 
+    def test_only_name_and_description(self):
+        fm = core.parse_frontmatter(
+            "---\nname: a\ndescription: b\nallowed-tools: Bash\nmodel: opus\n---\n")
+        self.assertLessEqual(set(fm), {"name", "description"})
+        self.assertEqual(fm, {"name": "a", "description": "b"})
+
     def test_broken(self):
         # 닫는 --- 없음
         self.assertEqual(core.parse_frontmatter("---\nname: a\nbody without close"), {})
@@ -141,9 +147,45 @@ class TestIterMd(FakeHome):
         self.assertIn((self.proj / ".cache" / "CLAUDE.md").as_posix(), found)
 
     def test_budget_truncates(self):
-        files, trunc = core._walk_md(self.proj, budget=1)
+        files, trunc, incomplete = core._walk_md(self.proj, budget=1)
+        self.assertFalse(incomplete)
         self.assertTrue(trunc)
         self.assertEqual(core.scan_project(self.proj)["truncated"], False)
+
+    def test_dir_budget_truncates_scan_project(self):
+        with mock.patch.object(core, "DIR_BUDGET", 3):
+            proj = core.scan_project(self.proj)
+        self.assertTrue(proj["truncated"])
+
+    def test_walk_error_marks_incomplete(self):
+        def fake_walk(top, onerror=None, **kw):
+            onerror(PermissionError(13, "denied", str(self.proj / "locked")))
+            return iter([])
+
+        with mock.patch("core.os.walk", side_effect=fake_walk):
+            proj = core.scan_project(self.proj)
+        self.assertTrue(proj["incomplete"])
+        self.assertTrue(any("walk failed" in e["error"] for e in core.errors()))
+        self.assertTrue(any(e["path"].endswith("/locked") for e in core.errors()))
+
+    def test_no_walk_error_means_complete(self):
+        self.assertFalse(core.scan_project(self.proj)["incomplete"])
+
+    def test_stat_race_drops_file(self):
+        target = self.proj / "sub" / "CLAUDE.md"
+        gone = core._p(target)
+        real = Path.stat
+
+        def flaky(self_, *a, **kw):
+            if Path(self_) == target:
+                raise FileNotFoundError(2, "gone", str(target))
+            return real(self_, *a, **kw)
+
+        with mock.patch.object(Path, "stat", flaky):
+            proj = core.scan_project(self.proj)
+        paths = {e["path"] for e in proj["claude_md"]}
+        self.assertNotIn(gone, paths)
+        self.assertIn(core._p(self.proj / "CLAUDE.md"), paths)
 
 
 class TestScan(FakeHome):
@@ -154,9 +196,13 @@ class TestScan(FakeHome):
         self.assertEqual(len(gone), 1)
         self.assertEqual(set(gone[0]), {"path", "exists"})
 
+    def _md(self, proj, path):
+        return {e["path"]: e for e in proj["claude_md"]}[core._p(path)]
+
     def test_imports(self):
         proj = core.scan_project(self.proj)
-        by_raw = {i["raw"]: i["exists"] for i in proj["imports"]}
+        e = self._md(proj, self.proj / "CLAUDE.md")
+        by_raw = {i["raw"]: i["exists"] for i in e["imports"]}
         self.assertTrue(by_raw["./docs/extra.md"])
         self.assertFalse(by_raw["./missing.md"])
 
@@ -164,9 +210,21 @@ class TestScan(FakeHome):
         w(self.proj / "CLAUDE.md", "# proj\n@./b.md\n")
         w(self.proj / "b.md", "@./c.md\n")
         w(self.proj / "c.md", "leaf\n")
-        raws = {i["raw"] for i in core.scan_project(self.proj)["imports"]}
+        proj = core.scan_project(self.proj)
+        raws = {i["raw"] for e in proj["claude_md"] for i in e["imports"]}
         self.assertIn("./b.md", raws)
         self.assertNotIn("./c.md", raws)
+
+    def test_subdir_imports_resolve_against_own_dir(self):
+        w(self.proj / "sub" / "CLAUDE.md", "# sub\n@x.md\n@nope.md\n")
+        w(self.proj / "sub" / "x.md", "y\n")
+        proj = core.scan_project(self.proj)
+        e = self._md(proj, self.proj / "sub" / "CLAUDE.md")
+        by_raw = {i["raw"]: i for i in e["imports"]}
+        self.assertEqual(by_raw["x.md"]["path"], core._p(self.proj / "sub" / "x.md"))
+        self.assertTrue(by_raw["x.md"]["exists"])
+        self.assertEqual(by_raw["nope.md"]["path"], core._p(self.proj / "sub" / "nope.md"))
+        self.assertFalse(by_raw["nope.md"]["exists"])
 
     def test_shared_false_without_git(self):
         proj = core.scan_project(self.proj)
@@ -206,6 +264,18 @@ class TestScan(FakeHome):
                 mock.patch("core.subprocess.run", return_value=r) as m:
             self.assertEqual(core._claude_version(), "2.1.267 (Claude Code)")
         self.assertEqual(m.call_args.kwargs["timeout"], 3)
+
+    def test_claude_version_timeout(self):
+        timeout = subprocess.TimeoutExpired("claude", 3)
+        with mock.patch("core.shutil.which", return_value="/usr/bin/claude"):
+            with mock.patch("core.subprocess.run", side_effect=timeout):
+                self.assertIsNone(core._claude_version())
+
+    def test_claude_version_nonzero_returncode(self):
+        r = mock.Mock(returncode=1, stdout="2.1.267\n")
+        with mock.patch("core.shutil.which", return_value="/usr/bin/claude"):
+            with mock.patch("core.subprocess.run", return_value=r):
+                self.assertIsNone(core._claude_version())
 
     def test_claude_version_absent(self):
         with mock.patch("core.shutil.which", return_value=None):
