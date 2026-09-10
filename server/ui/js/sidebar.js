@@ -142,6 +142,8 @@ function buildTool(slot){
 function renderSide(){
   var host = document.getElementById("sidebody"), a = document.activeElement;
   var k = (a && host.contains(a)) ? a.getAttribute("data-key") : null;
+  // 같은 뷰 재렌더면 스크롤 위치 유지 — clear() 가 스크롤을 0으로 되돌리고 focus() 가 행을 끌어와 위치가 튀는 것 방지
+  var top = (SIDETOOL === S.side) ? host.scrollTop : 0;
   document.getElementById("side-title").textContent = VIEW_TITLE[S.side] || "";
   sideCount("");
   if(SIDETOOL !== S.side){
@@ -157,9 +159,12 @@ function renderSide(){
   else if(S.side === "hooks") renderHooksSide(host, ctx);
   else renderMcpSide(host, ctx);
   renderStatus();
+  host.scrollTop = top;
   if(!k) return;
   var all = host.querySelectorAll("[data-key]");
-  for(var i=0;i<all.length;i++){ if(all[i].getAttribute("data-key") === k){ all[i].focus(); return; } }
+  for(var i=0;i<all.length;i++){
+    if(all[i].getAttribute("data-key") === k){ all[i].focus({preventScroll:true}); return; }
+  }
 }
 
 /* ---------- 1. 탐색기 트리 ---------- */
