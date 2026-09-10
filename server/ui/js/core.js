@@ -30,8 +30,37 @@ var S = {scan:null, project:null, side:"files", file:null, fileErr:null, filePat
          cardq:{q:"", kinds:{skill:true, agent:true, command:true}},
          // toggleTarget: 토글 저장 대상 파일. toggleErr: 직전 토글 실패 메시지 (툴바 아래 한 줄)
          toggleTarget:"settings.local.json", toggleErr:null,
-         // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls}
-         edit:null, issues:null};
+         // edit: 편집 중일 때만 객체 {path,text,dirty,issues,busy,conflict,msg,msgCls,range}
+         //   range: 섹션 편집이면 {start,end,title} — 저장이 /api/save-range 로 간다
+         edit:null, issues:null,
+         // folds[path] = {헤딩 start: true} — 접힌 섹션. 파일 재로드·저장·재스캔에도 유지
+         folds:Object.create(null),
+         // conflicts: /api/rules 의 충돌 목록, conflictSel: 인스펙터에서 펼쳐 본 제목
+         conflicts:null, conflictSel:null,
+         // fileCache[path] = /api/file 응답 (충돌 본문 표시용) — 재스캔 시 비운다
+         fileCache:Object.create(null), cacheBusy:Object.create(null),
+         // cmpq: 규칙 사이드바의 제목 비교 검색어
+         cmpq:""};
+/* 비교 가상 탭: 경로 자리에 "compare:<제목>" 을 쓴다 — 탭·에디터 기존 흐름을 그대로 탄다 */
+var CMP = "compare:";
+function isCompare(p){ return String(p||"").indexOf(CMP) === 0; }
+function cmpTitle(p){ return String(p||"").slice(CMP.length); }
+// 충돌 제목 → 항목. 제목이 __proto__ 여도 안전하도록 프로토타입 없는 객체
+function conflictMap(){
+  var m = Object.create(null);
+  (S.conflicts||[]).forEach(function(c){ if(c && c.title) m[c.title] = c; });
+  return m;
+}
+// 줄 배열 → 저장 본문 조립 (백엔드 replace_range 와 같은 정규화)
+function rangeLines(text){
+  return String(text||"").replace(/\r\n/g,"\n").replace(/\n+$/,"").split("\n");
+}
+function spliceLines(text, start, end, newText){
+  var lines = String(text||"").split("\n");
+  var args = [start, end - start].concat(rangeLines(newText));
+  Array.prototype.splice.apply(lines, args);
+  return lines.join("\n");
+}
 function retryBtn(fn){ var b = el("button","linkbtn","다시 시도"); b.onclick = fn; return b; }
 // 개발용 훅: #sample 이면 정적 서버의 scan-sample.json을 스캔 응답 대신 사용
 var SAMPLE = location.hash === "#sample";

@@ -211,16 +211,18 @@ function selectProject(p){
 /* 2. 유효 규칙 — 인스펙터 `함께 적용됨`과 같은 데이터를 공유 */
 async function loadEff(){
   var proj = (S.project && S.project.exists !== false) ? S.project.path : null;
-  S.eff = null; S.effErr = null;
+  S.eff = null; S.effErr = null; S.conflicts = null; S.conflictSel = null;
   var seq = ++S.eseq;
   if(!proj) return;
-  var sseq = S.sseq, items = null, err = null;
+  var sseq = S.sseq, body = null, err = null;
   try{
-    items = await getJSON("/api/effective?project="+encodeURIComponent(proj));
+    body = await getJSON("/api/rules?project="+encodeURIComponent(proj));
   }catch(e){ err = e.message; }
   if(S.dead || seq !== S.eseq || sseq !== S.sseq) return;
   if(!S.project || S.project.path !== proj) return;   // 프로젝트가 바뀐 응답은 버린다
-  S.eff = items; S.effErr = err;
+  S.eff = body ? (body.files || []) : null;
+  S.conflicts = body ? (body.conflicts || []) : null;
+  S.effErr = err;
   renderInspector();
   if(S.side === "rules") renderSide();
 }
@@ -249,8 +251,62 @@ function sideItem(parent, o){
 }
 function sideMsg(parent, text, cls){ parent.appendChild(el("div","pad "+(cls || "hint"), text)); }
 
+/* 제목으로 프로젝트 간 비교 — Enter 또는 버튼이면 compare:<제목> 가상 탭 */
+function openCompare(title){
+  title = String(title || "").trim();
+  if(title) openFile(CMP + title);
+}
+function cmpBar(){
+  var bar = el("div","tbar");
+  var inp = el("input");
+  inp.type = "search";
+  inp.placeholder = "제목으로 프로젝트 간 비교";
+  inp.setAttribute("aria-label","제목으로 프로젝트 간 비교");
+  inp.setAttribute("data-key","cmpq");
+  inp.value = S.cmpq;
+  inp.oninput = function(){ S.cmpq = inp.value; };
+  inp.onkeydown = function(ev){
+    if(ev.key !== "Enter") return;
+    ev.preventDefault();
+    openCompare(inp.value);
+  };
+  bar.appendChild(inp);
+  var b = el("button", null, "비교");
+  b.setAttribute("data-key","cmpgo");
+  b.onclick = function(){ openCompare(S.cmpq); };
+  bar.appendChild(b);
+  return bar;
+}
+// 파일 행 아래 섹션 행 — ponytail: `##` 이상만, 레벨별 4px 들여쓰기. 접힘 없이 그대로 나열
+function sectionRows(root, it, conf){
+  (it.sections || []).forEach(function(sec){
+    if(!sec || sec.level < 2) return;
+    var row = el("div","secrow");
+    var b = el("button","secbtn");
+    b.style.paddingLeft = (14 + (sec.level - 1) * 4) + "px";
+    b.setAttribute("data-key", it.path + "#" + sec.start);
+    b.title = it.path + " · L" + (sec.start + 1);
+    b.appendChild(el("span","t", sec.title || "(제목 없음)"));
+    if(conf[sec.title]){
+      var bd = badge("충돌","warn");
+      bd.title = "전역과 프로젝트에 같은 제목 섹션";
+      b.appendChild(bd);
+      row.classList.add("conf");
+    }
+    b.onclick = function(){ openFile(it.path, {line:sec.start}); };
+    row.appendChild(b);
+    var cb = el("button","cmpico","⇄");
+    cb.setAttribute("aria-label", (sec.title || "이 섹션") + " 제목으로 프로젝트 간 비교");
+    cb.setAttribute("data-key", "cmp:" + it.path + "#" + sec.start);
+    cb.title = "제목으로 프로젝트 간 비교";
+    cb.onclick = function(){ openCompare(sec.title); };
+    row.appendChild(cb);
+    root.appendChild(row);
+  });
+}
 /* 사이드바 2. 규칙 — 적용 순서대로. 본문은 에디터가 보여준다 */
 function renderRulesSide(root){
+  root.appendChild(cmpBar());
   if(!S.project){ sideMsg(root, "파일 사이드바에서 프로젝트를 선택하세요."); return; }
   if(S.project.exists === false){ sideMsg(root, "경로가 존재하지 않는 프로젝트입니다."); return; }
   var pname = S.project.name || S.project.path;
@@ -263,14 +319,17 @@ function renderRulesSide(root){
   if(!S.eff){ sideMsg(root, "불러오는 중…"); return; }
   if(!S.eff.length){ sideMsg(root, "적용되는 규칙 파일이 없습니다."); return; }
   sideCount(S.eff.length + "개 · " + pname);
+  var conf = conflictMap();
   S.eff.forEach(function(it, i){
     var m = S.meta[it.path] || {};
     sideItem(root, {text: m.label || baseName(it.path), key: it.path, title: it.path,
       sel: S.filePath === it.path, lead: el("span","rnum", String(i+1)),
       badges: [badge(SCOPE_KO[it.scope] || it.scope),
                it.shared ? badge("팀 공유","shared") : null,
-               it.lazy ? badge("지연 로드","warn") : null],
+               it.lazy ? badge("지연 로드","warn") : null,
+               it.error ? badge("읽기 실패","off") : null],
       onclick: function(){ openFile(it.path); }});
+    sectionRows(root, it, conf);
   });
 }
 
