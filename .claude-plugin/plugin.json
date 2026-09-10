@@ -1,6 +1,6 @@
 {
   "name": "config-map",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Visualize every local Claude Code config (CLAUDE.md, settings, skills, hooks, plugins, MCP) in one browser view",
   "author": {
     "name": "junseok.cha",
