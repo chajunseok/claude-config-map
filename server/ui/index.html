@@ -18,7 +18,7 @@
 @media (prefers-color-scheme: light){
   :root{
     --bg:#fafbfc; --bar:#f1f4f7; --ed:#ffffff; --bd:#dfe3e8;
-    --fg:#1c2430; --muted:#6b7684; --val:#454f5b;
+    --fg:#1c2430; --muted:#5c6773; --val:#454f5b;
     --acc:#3b5bdb; --sel:#dbe7ff; --selfg:#1c2430;
     --green:#1f6b3f; --warn:#a86800; --err:#b3261e;
     --hover:#eaeef3; --purple:#6a3fb0;
@@ -93,7 +93,8 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 /* 스킬 뷰 */
 .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;align-items:start}
 .card{border:1px solid var(--bd);border-radius:6px;padding:8px;background:var(--bg);min-width:0}
-.card.dim{opacity:.55}
+/* OFF 카드: 텍스트 대비는 유지하고 배경/경계선만 흐리게 */
+.card.dim{border-style:dashed;border-color:var(--muted)}
 .card h4{margin:0 0 4px;font-size:13px;word-break:break-all}
 .card .kv{color:var(--muted);font-size:11px;margin-bottom:4px}
 .card .desc{font-size:12px;max-height:9em;overflow:auto;color:var(--val)}
@@ -250,15 +251,27 @@ function pluginOff(pl){ return enabledPlugins()[pl.key] === false; }
 
 /* ---------- 스캔 인덱스 (경로 → 표시용 메타) ---------- */
 // 재스캔 후 선택 복원 + 인스펙터 속성 표시. API 계약의 "직전 스캔에 등장한 경로"와 동일 범위.
+// 프로젝트 경로 기준 상대경로 (구분자 /), 접두어가 아니면 null
+function relLabel(path, base){
+  var p = String(path||"").replace(/\\/g,"/");
+  var b = String(base||"").replace(/\\/g,"/").replace(/\/+$/,"");
+  if(!b) return null;
+  return p.toLowerCase().indexOf(b.toLowerCase()+"/") === 0 ? p.slice(b.length+1) : null;
+}
 function scanIndex(sc){
   var set = Object.create(null);
-  function add(f, m){ if(f && f.path && !set[f.path]) set[f.path] = {scope:m.scope, origin:m.origin, shared:!!f.shared, lazy:f.scope === "subdir"}; }
+  function add(f, m){
+    if(!f || !f.path || set[f.path]) return;
+    var lazy = f.scope === "subdir";
+    set[f.path] = {scope:m.scope, origin:m.origin, project:m.project || null, shared:!!f.shared,
+                   lazy:lazy, label: lazy ? relLabel(f.path, m.project) : null};
+  }
   function addAll(a, m){ (a||[]).forEach(function(f){ add(f, m); }); }
   function addSettings(o, m){ keys(o).forEach(function(k){ add(o[k], m); }); }
-  function addKinds(o, origin, prefix){
-    addAll(o.skills, {scope:prefix+" skills", origin:origin});
-    addAll(o.agents, {scope:prefix+" agents", origin:origin});
-    addAll(o.commands, {scope:prefix+" commands", origin:origin});
+  function addKinds(o, origin, prefix, proj){
+    addAll(o.skills, {scope:prefix+" skills", origin:origin, project:proj});
+    addAll(o.agents, {scope:prefix+" agents", origin:origin, project:proj});
+    addAll(o.commands, {scope:prefix+" commands", origin:origin, project:proj});
   }
   var g = sc.global || {};
   add(g.claude_md, {scope:"전역", origin:"전역"});
@@ -268,11 +281,11 @@ function scanIndex(sc){
   (sc.projects||[]).forEach(function(p){
     var o = p.name || p.path;
     (p.claude_md||[]).forEach(function(f){
-      add(f, {scope: f.scope === "subdir" ? "하위 폴더" : "프로젝트", origin:o});
+      add(f, {scope: f.scope === "subdir" ? "하위 폴더" : "프로젝트", origin:o, project:p.path});
     });
-    addAll(p.rules, {scope:"프로젝트 rules", origin:o});
-    addSettings(p.settings, {scope:"프로젝트 settings", origin:o});
-    addKinds(p, o, "프로젝트");
+    addAll(p.rules, {scope:"프로젝트 rules", origin:o, project:p.path});
+    addSettings(p.settings, {scope:"프로젝트 settings", origin:o, project:p.path});
+    addKinds(p, o, "프로젝트", p.path);
   });
   (sc.plugins||[]).forEach(function(pl){
     var o = "플러그인 " + (pl.name || pl.key);
@@ -314,6 +327,11 @@ function rowEl(depth){
   d.style.paddingLeft = (6 + depth*14) + "px";
   return d;
 }
+// 표시명: 하위 폴더 CLAUDE.md 는 프로젝트 기준 상대경로
+function labelOf(f){
+  var m = S.meta[f.path];
+  return (m && m.label) || f.name || f.path || "(이름 없음)";
+}
 function mainBtn(text, num, cls){
   var b = el("button","mn");
   b.appendChild(el("span","nm"+(cls?" "+cls:""), text));
@@ -327,6 +345,7 @@ function foldRow(parent, depth, id, dflt, label, num, cls){
   r.appendChild(el("span","arw", open ? "▾" : "▸"));
   var b = mainBtn(label, num, cls);
   b.setAttribute("aria-expanded", String(open));
+  b.setAttribute("data-key", id);
   b.onclick = function(){ setOpen(id, dflt); };
   r.appendChild(b);
   parent.appendChild(r);
@@ -342,8 +361,9 @@ function fileRow(parent, depth, f, opts){
   var r = rowEl(depth);
   if(S.filePath === f.path) r.classList.add("sel");
   r.appendChild(el("span","arw",""));
-  var b = mainBtn(f.name || f.path || "(이름 없음)", null, opts.cls);
+  var b = mainBtn(labelOf(f), null, opts.cls);
   b.title = fileTitle(f, opts.note);
+  b.setAttribute("data-key", f.path);
   b.onclick = function(){ openFile(f.path); };
   r.appendChild(b);
   parent.appendChild(r);
@@ -374,6 +394,7 @@ function settingsNode(parent, depth, id, obj){
   if(!foldRow(parent, depth, id, false, "settings", ks.length)) return;
   ks.forEach(function(k){
     var v = obj[k];
+    if(!v) return;
     fileRow(parent, depth+1, {path:v.path, name:k, size:v.size, mtime:v.mtime, shared:v.shared});
   });
 }
@@ -383,7 +404,16 @@ function globalCount(g){
 function projCount(p){
   return len(p.claude_md) + len(p.rules) + keys(p.settings).length + len(p.skills) + len(p.agents) + len(p.commands);
 }
+// 재렌더 시 포커스 행 유지 — data-key 로 같은 버튼을 다시 찾는다
 function renderTree(){
+  var t = document.getElementById("tree"), a = document.activeElement;
+  var k = (a && t.contains(a)) ? a.getAttribute("data-key") : null;
+  renderTreeBody();
+  if(!k) return;
+  var all = t.querySelectorAll("[data-key]");
+  for(var i=0;i<all.length;i++){ if(all[i].getAttribute("data-key") === k){ all[i].focus(); return; } }
+}
+function renderTreeBody(){
   var root = clear(document.getElementById("tree"));
   var cnt = document.getElementById("exp-count");
   if(!S.scan){ cnt.textContent = ""; return; }
@@ -418,6 +448,7 @@ function projectNode(parent, p){
   tg.setAttribute("aria-label", (p.name||p.path)+" 하위 항목 "+(open?"접기":"펼치기"));
   tg.disabled = gone;
   if(gone) tg.textContent = "";
+  tg.setAttribute("data-key", "tg:"+id);
   tg.onclick = function(){ setOpen(id, false); };
   r.appendChild(tg);
   var notes = [];
@@ -427,6 +458,7 @@ function projectNode(parent, p){
   var cls = gone ? "gone" : (notes.length ? "warn b" : "b");
   var nb = mainBtn(p.name || p.path, gone ? null : projCount(p), cls);
   nb.title = p.path + (notes.length ? " · " + notes.join(" · ") : "");
+  nb.setAttribute("data-key", id);
   if(sel) nb.setAttribute("aria-current","true");
   nb.onclick = function(){ selectProject(p); };
   r.appendChild(nb);
@@ -468,7 +500,7 @@ function addTab(path){
   if(S.tabs.some(function(x){ return x.path === path; })) return;   // 이미 열린 탭은 위치 유지
   var m = S.meta[path] || {};
   var seg = String(path).split(/[\\/]/);
-  var t = {path:path, name: seg[seg.length-1] || path, sub: m.origin || ""};
+  var t = {path:path, name: m.label || seg[seg.length-1] || path, sub: m.origin || ""};
   S.tabs.push(t);
   if(S.tabs.length > MAX_TABS) S.tabs = S.tabs.slice(S.tabs.length - MAX_TABS);
 }
@@ -544,7 +576,18 @@ function renderPanel(){
 }
 
 /* 1. 원문 */
+// 파일이 어떤 프로젝트 소속이면 그 프로젝트로 컨텍스트를 맞춘다 (전역·플러그인 파일이면 유지)
+function syncProject(path){
+  var m = S.meta[path];
+  if(!m || !m.project) return;
+  if(S.project && S.project.path === m.project) return;
+  var pr = ((S.scan && S.scan.projects) || []).filter(function(x){ return x.path === m.project; })[0];
+  if(!pr) return;
+  S.project = pr;
+  loadEff();   // 트리·인스펙터 렌더는 openFile 이 이어서 수행
+}
 async function openFile(path, keepTab){
+  syncProject(path);
   S.file = null; S.fileErr = null; S.filePath = path;
   addTab(path);
   renderTree();
@@ -701,7 +744,7 @@ function renderCards(){
 
 /* 4. 훅 흐름 */
 function hookSource(src){
-  src = src || "";
+  src = String(src || "");
   if(src.indexOf("global:") === 0) return {cls:"global", label:"전역 · "+src.slice(7)};
   if(src.indexOf("plugin:") === 0) return {cls:"plugin", label:"플러그인 · "+src.slice(7)};
   if(src.indexOf("project:") === 0){
@@ -901,10 +944,11 @@ function renderInspector(){
   else{
     var list2 = el("div","efflist");
     S.eff.forEach(function(it, i){
-      var cur = it.path === S.filePath;
+      var cur = it.path === S.filePath, im = S.meta[it.path] || {};
       var row = el("div","effitem"+(cur ? " cur" : "")+(it.lazy ? " lazyit" : ""));
+      row.title = it.path;
       row.appendChild(el("span","n", String(i+1)));
-      row.appendChild(el("span", null, it.path + (cur ? "  ← 현재" : "") + (it.lazy ? " · 지연" : "")));
+      row.appendChild(el("span", null, (im.label || it.path) + (cur ? "  ← 현재" : "") + (it.lazy ? " · 지연" : "")));
       list2.appendChild(row);
     });
     es.appendChild(list2);
@@ -961,7 +1005,7 @@ async function loadScan(){
   if(S.dead || S.loading) return;   // 진행 중 재스캔 재요청은 무시
   // 복원용 선택은 미리 잡아 두고, 상태 교체는 완료 시점에만
   var prevProject = S.project && S.project.path, prevFile = S.filePath;
-  var prevSseq = S.sseq, seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관
+  var seq = ++S.sseq;   // 스캔 세대는 뷰 전환(S.seq)과 무관 · 실패해도 되돌리지 않는다
   S.loading = true; S.msg = null;
   renderInspector();
   clear(document.getElementById("tree")).appendChild(el("div","pad hint","스캔 중…"));
@@ -973,13 +1017,15 @@ async function loadScan(){
   S.loading = false;
   if(S.dead || seq !== S.sseq) return;
   if(err){  // 이전 스캔 데이터는 유지 — 트리도 그대로 두어 뷰와 어긋나지 않게
-    S.sseq = prevSseq;   // 실패 = 이전 스캔 유지. 세대를 되돌려 진행 중이던 파일·규칙 응답을 살린다
     renderInspector();
     if(S.scan) renderTree();
     var q = panel(), qp = el("div","pad");
     q.appendChild(qp);
     qp.appendChild(el("p","err","스캔에 실패했습니다: "+err));
     qp.appendChild(retryBtn(loadScan));
+    // 세대(sseq)는 되돌리지 않는다 — 스캔 중 도착해 폐기된 응답은 지금 다시 요청해 복구
+    if(S.project && !S.eff && !S.effErr) loadEff();
+    if(S.filePath && !S.file && !S.fileErr) openFile(S.filePath, true);
     return;
   }
   S.scan = scan;
