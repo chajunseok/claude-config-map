@@ -241,6 +241,17 @@ class TestScan(FakeHome):
         self.assertTrue(projects[0]["exists"])
         self.assertEqual(projects[0]["path"], core._p(self.home / "proj2"))
 
+    def test_same_dir_registered_twice_is_one_project(self):
+        """`C:/x` 와 `c:/x` 처럼 표기만 다른 같은 폴더는 프로젝트 1개 (UI 중복 행 방지)."""
+        w(self.home / "proj3" / "CLAUDE.md", "# p3\n")
+        a = (self.home / "proj3").as_posix()
+        variants = {a: {}, a.replace("/proj3", "//proj3"): {}, "~/proj3/": {}}
+        if a[1:2] == ":":
+            variants[a[0].swapcase() + a[1:]] = {}
+        self.write_registry({"projects": variants})
+        projects = core.scan_projects()
+        self.assertEqual([p["path"] for p in projects], [core._p(self.home / "proj3")])
+
 
 class TestCoverage(FakeHome):
     def test_ancestor_is_root_only(self):
