@@ -331,6 +331,73 @@ class TestEndpoints(ServerCase):
         self.assertIsNone(web_server.live_url())
 
 
+class TestStaticFiles(ServerCase):
+    """`/ui/<상대경로>` 정적 서빙. 실제 server/ui 대신 임시 디렉터리를 UI_DIR로 쓴다."""
+
+    def setUp(self):
+        super().setUp()
+        self.ui_dir = Path(self.tmp.name) / "uidir"
+        (self.ui_dir / "js").mkdir(parents=True)
+        (self.ui_dir / "app.css").write_bytes(b"body{color:red}\n")
+        (self.ui_dir / "js" / "core.js").write_bytes(b"var S = {};\n")
+        (self.ui_dir / "index.html").write_bytes(b"<h1>hi</h1>")
+        (self.ui_dir / "notes.txt").write_bytes(b"nope\n")
+        (self.ui_dir / "dir.js").mkdir()
+        self.secret_js = Path(self.tmp.name) / "secret.js"
+        self.secret_js.write_bytes(b"stolen\n")
+        patch = mock.patch.object(web_server, "UI_DIR", self.ui_dir)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def assert404(self, rel):
+        code, body, ctype = get(self.url + "/ui/" + rel)
+        self.assertEqual(code, 404, rel)
+        self.assertIn("application/json", ctype)
+        self.assertEqual(json.loads(body)["error"], "not found")
+
+    def test_css_served_with_mime_and_no_store(self):
+        with urllib.request.urlopen(self.url + "/ui/app.css", timeout=5) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers.get("Content-Type"), "text/css; charset=utf-8")
+            self.assertEqual(r.headers.get("Cache-Control"), "no-store")
+            self.assertEqual(r.read(), b"body{color:red}\n")
+
+    def test_nested_js_served(self):
+        code, body, ctype = get(self.url + "/ui/js/core.js")
+        self.assertEqual(code, 200)
+        self.assertEqual(ctype, "text/javascript; charset=utf-8")
+        self.assertEqual(body, "var S = {};\n")
+
+    def test_missing_file_is_404(self):
+        self.assert404("js/nope.js")
+
+    def test_html_and_other_extensions_are_404(self):
+        self.assert404("index.html")
+        self.assert404("notes.txt")
+        self.assert404("")
+
+    def test_directory_is_404(self):
+        self.assert404("dir.js")
+        self.assert404("js/")
+
+    def test_traversal_is_404(self):
+        self.assert404("../secret.js")
+        self.assert404("%2e%2e%2fsecret.js")
+        self.assert404("js/../../secret.js")
+
+    def test_absolute_path_and_drive_letter_are_404(self):
+        self.assert404("/" + self.secret_js.as_posix().lstrip("/"))
+        self.assert404("C:/Windows/win.js")
+
+    def test_null_byte_is_404(self):
+        self.assert404("app.css%00")
+        self.assert404("app%00.css")
+
+    def test_api_routes_unaffected(self):
+        code, _, _ = get(self.url + "/api/ping")
+        self.assertEqual(code, 200)
+        self.assert404("../secret.js")
+
 class TestEditEndpoints(ServerCase):
     """POST /api/validate · /api/save 상태 코드 매트릭스."""
 

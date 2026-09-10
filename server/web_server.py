@@ -20,7 +20,7 @@ import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core  # noqa: E402
@@ -30,6 +30,9 @@ MAX_BODY = 1 << 20  # POST 본문 상한 1 MiB
 PORT_TRIES = 20
 LOCK_WAIT = 3.0  # 잠금 대기 상한(초). 넘으면 stale lock으로 본다
 UI = Path(__file__).resolve().parent / "ui" / "index.html"
+UI_DIR = UI.parent
+# 정적 서빙 대상은 이 둘뿐. index.html은 `/`로만 나간다 (`/ui/index.html`은 404)
+STATIC_TYPES = {".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8"}
 
 log = logging.getLogger("config-map.web")
 
@@ -98,10 +101,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- 응답 헬퍼 ---
 
-    def _send(self, code: int, body: bytes, ctype: str):
+    def _send(self, code: int, body: bytes, ctype: str, cache: str | None = None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        if cache:
+            self.send_header("Cache-Control", cache)
         self.end_headers()
         self.wfile.write(body)
 
@@ -141,6 +146,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._file((q.get("path") or [""])[0])
         if u.path == "/api/effective":
             return self._effective((q.get("project") or [""])[0])
+        if u.path.startswith("/ui/"):
+            return self._static(unquote(u.path[len("/ui/"):]))
         self._err(404, "not found")
 
     def _post(self):
@@ -228,6 +235,25 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._err(503, "UI not built")
         self._send(200, body, "text/html; charset=utf-8")
+
+    def _static(self, rel: str):
+        """`/ui/<상대경로>` → server/ui 아래의 .css/.js 파일. 벗어나면 전부 404."""
+        # ponytail: _index와 같이 매 요청 디스크에서 읽고 no-store. 단일 사용자 개발 도구라 캐시가 무의미.
+        root = UI_DIR.resolve()
+        try:
+            if "\x00" in rel:  # resolve() 동작이 플랫폼마다 달라 먼저 막는다
+                raise ValueError(rel)
+            target = (root / rel).resolve()
+        except (OSError, ValueError):
+            return self._err(404, "not found")
+        ctype = STATIC_TYPES.get(target.suffix)
+        if ctype is None or not target.is_relative_to(root):
+            return self._err(404, "not found")
+        try:
+            body = target.read_bytes()
+        except OSError:  # 없는 파일·디렉터리·권한 — 존재 여부를 알리지 않고 전부 404
+            return self._err(404, "not found")
+        self._send(200, body, ctype, cache="no-store")
 
     def _scan(self):
         result = core.scan()
