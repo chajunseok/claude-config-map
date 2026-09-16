@@ -8,7 +8,8 @@
 <p align="center">
   <strong>Language:</strong>
   <a href="README.md">English</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -105,7 +106,7 @@ python server/web_server.py            # --port 9000, --no-browser
 - 최신 Chrome / Edge / Firefox
 - Claude Code CLI 로그인 (편집 도우미에만 필요)
 
-Windows 11 에서 검증했습니다. macOS·Linux 도 동작할 것으로 보지만 아직 측정하지 않았습니다. 제보 환영합니다.
+Windows 11 에서 검증했습니다. macOS·Linux 도 동작할 것으로 보지만 아직 측정하지 않았습니다. 문제가 있으면 [이슈](https://github.com/chajunseok/claude-config-map/issues)로, 의견은 [Discussions](https://github.com/chajunseok/claude-config-map/discussions)에 남겨 주세요.
 
 ## 문서
 
@@ -113,7 +114,7 @@ Windows 11 에서 검증했습니다. macOS·Linux 도 동작할 것으로 보�
 
 ## 기여
 
-이슈와 PR 환영합니다. 시작은:
+[이슈](https://github.com/chajunseok/claude-config-map/issues), [Discussions](https://github.com/chajunseok/claude-config-map/discussions), PR 모두 환영합니다. 시작은:
 
 ```bash
 python -m unittest discover -s server/tests

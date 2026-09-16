@@ -8,7 +8,8 @@
 <p align="center">
   <strong>Language:</strong>
   <a href="README.md">English</a> |
-  <a href="README.ko.md">한국어</a>
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
@@ -105,7 +106,7 @@ Details: [Security](docs/guide.md#security) · [Files this tool reads and writes
 - A recent Chrome, Edge or Firefox
 - Claude Code CLI login, only for the edit assistant
 
-Tested on Windows 11. macOS and Linux should work but have not been measured yet. Reports are welcome.
+Tested on Windows 11. macOS and Linux should work but have not been measured yet. Please [open an issue](https://github.com/chajunseok/claude-config-map/issues) if something breaks, or share feedback in [Discussions](https://github.com/chajunseok/claude-config-map/discussions).
 
 ## Documentation
 
@@ -113,7 +114,7 @@ The full [guide](docs/guide.md) covers the layout, each sidebar, validation rule
 
 ## Contributing
 
-Issues and pull requests are welcome. To start:
+[Issues](https://github.com/chajunseok/claude-config-map/issues), [Discussions](https://github.com/chajunseok/claude-config-map/discussions) and pull requests are welcome. To start:
 
 ```bash
 python -m unittest discover -s server/tests

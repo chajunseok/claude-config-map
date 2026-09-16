@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please check [Troubleshooting](https://github.com/chajunseok/claude-config-map/blob/main/docs/guide.md#troubleshooting) first.
+        Do not paste secrets from your settings or `.mcp.json` (API keys, tokens).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run /config-map
+        2. Open the Rules sidebar
+        3. ...
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options: [Windows, macOS, Linux, Other]
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "config-map version (plugin.json), `python --version`, `claude --version`"
+      placeholder: "config-map 0.7.0, Python 3.12.4, Claude Code 2.1.199"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser
+      placeholder: Chrome 140
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output or screenshots
+      description: Server console output, the inspector error list, or a screenshot.
