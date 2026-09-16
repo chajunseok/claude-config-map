@@ -6,7 +6,10 @@
     "name": "junseok.cha",
     "url": "https://github.com/chajunseok"
   },
+  "homepage": "https://github.com/chajunseok/claude-config-map",
   "repository": "https://github.com/chajunseok/claude-config-map",
+  "license": "MIT",
+  "keywords": ["claude-code", "claude-md", "settings", "skills", "hooks", "mcp", "plugins", "dashboard", "config-editor"],
   "commands": [
     "./commands/"
   ]
